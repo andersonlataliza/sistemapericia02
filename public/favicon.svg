@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="url(#bg)"/>
+  <!-- Scale icon -->
+  <g stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- top beam -->
+    <line x1="16" y1="18" x2="48" y2="18"/>
+    <!-- center column -->
+    <line x1="32" y1="18" x2="32" y2="44"/>
+    <!-- base -->
+    <line x1="22" y1="44" x2="42" y2="44"/>
+    <!-- left hanger -->
+    <line x1="22" y1="18" x2="22" y2="30"/>
+    <!-- right hanger -->
+    <line x1="42" y1="18" x2="42" y2="30"/>
+    <!-- left pan -->
+    <path d="M16 30 L28 30 L22 36 Z"/>
+    <!-- right pan -->
+    <path d="M36 30 L48 30 L42 36 Z"/>
+  </g>
+</svg>
