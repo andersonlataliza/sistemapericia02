@@ -143,6 +143,13 @@ export interface AdminDeleteUserResponse {
   error?: string;
 }
 
+export interface DeleteProcessResponse {
+  success: boolean;
+  message: string;
+  removedFiles?: number;
+  storageWarnings?: string[];
+}
+
 // Classe para gerenciar as chamadas das Edge Functions
 export class SupabaseAPI {
 
@@ -561,6 +568,134 @@ export class SupabaseAPI {
       message, 
       processId 
     });
+  }
+
+  static async deleteProcess(processId: string): Promise<DeleteProcessResponse> {
+    const pid = String(processId || '').trim();
+    if (!pid) throw new Error('Processo inválido');
+
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) throw new Error('Sessão expirada');
+
+    const { data: proc, error: procErr } = await supabase
+      .from('processes')
+      .select('id, user_id')
+      .eq('id', pid)
+      .single();
+    if (procErr || !proc) throw (procErr as any) || new Error('Processo não encontrado');
+
+    if (String((proc as any).user_id || '') !== String(user.id)) {
+      throw new Error('Sem permissão para excluir este processo');
+    }
+
+    const prefix = `${user.id}/${pid}/`;
+    const storageWarnings: string[] = [];
+    const filePaths = new Set<string>();
+
+    const collectPaths = (value: any) => {
+      const stack = [value];
+      while (stack.length > 0) {
+        const curr = stack.pop();
+        if (!curr) continue;
+        if (typeof curr === 'string') {
+          const s = curr.trim();
+          if (s && s.startsWith(prefix)) filePaths.add(s);
+          continue;
+        }
+        if (Array.isArray(curr)) {
+          for (const v of curr) stack.push(v);
+          continue;
+        }
+        if (typeof curr === 'object') {
+          for (const v of Object.values(curr as any)) stack.push(v);
+        }
+      }
+    };
+
+    try {
+      const { data: docs, error } = await supabase
+        .from('documents')
+        .select('file_path')
+        .eq('process_id', pid);
+      if (error) throw error;
+      (docs || []).forEach((d: any) => collectPaths(d?.file_path));
+    } catch (e: any) {
+      storageWarnings.push(`Falha ao listar documentos: ${e?.message || 'erro'}`);
+    }
+
+    try {
+      const { data: reps, error } = await supabase
+        .from('reports')
+        .select('file_path')
+        .eq('process_id', pid);
+      if (error) throw error;
+      (reps || []).forEach((r: any) => collectPaths(r?.file_path));
+    } catch (e: any) {
+      storageWarnings.push(`Falha ao listar relatórios: ${e?.message || 'erro'}`);
+    }
+
+    try {
+      const { data: qs, error } = await supabase
+        .from('questionnaires')
+        .select('attachments')
+        .eq('process_id', pid);
+      if (error) throw error;
+      (qs || []).forEach((q: any) => collectPaths(q?.attachments));
+    } catch (e: any) {
+      storageWarnings.push(`Falha ao listar anexos de quesitos: ${e?.message || 'erro'}`);
+    }
+
+    try {
+      const { data: ras, error } = await supabase
+        .from('risk_agents')
+        .select('evidence_photos')
+        .eq('process_id', pid);
+      if (error) throw error;
+      (ras || []).forEach((ra: any) => collectPaths(ra?.evidence_photos));
+    } catch (e: any) {
+      storageWarnings.push(`Falha ao listar evidências de agentes: ${e?.message || 'erro'}`);
+    }
+
+    const paths = Array.from(filePaths);
+    let removedFiles = 0;
+    for (let i = 0; i < paths.length; i += 100) {
+      const batch = paths.slice(i, i + 100);
+      try {
+        const { error } = await supabase.storage.from('process-documents').remove(batch);
+        if (error) throw error;
+        removedFiles += batch.length;
+      } catch (e: any) {
+        storageWarnings.push(`Falha ao remover arquivos (${batch.length}): ${e?.message || 'erro'}`);
+      }
+    }
+
+    const steps: Array<PromiseLike<{ error: any }>> = [
+      supabase.from('process_access').delete().eq('process_id', pid),
+      supabase.from('schedule_email_receipts').delete().eq('process_id', pid),
+      supabase.from('notifications').delete().eq('process_id', pid),
+      supabase.from('questionnaires').delete().eq('process_id', pid),
+      supabase.from('reports').delete().eq('process_id', pid),
+      supabase.from('risk_agents').delete().eq('process_id', pid),
+      supabase.from('documents').delete().eq('process_id', pid),
+    ];
+    for (const p of steps) {
+      const res: any = await p;
+      if (res?.error) throw res.error;
+    }
+
+    const { error: delProcErr } = await supabase
+      .from('processes')
+      .delete()
+      .eq('id', pid)
+      .eq('user_id', user.id);
+    if (delProcErr) throw delProcErr;
+
+    return {
+      success: true,
+      message: 'Processo excluído definitivamente',
+      removedFiles,
+      storageWarnings: storageWarnings.length ? storageWarnings : undefined,
+    };
   }
 
   static async adminCreateUser(params: AdminCreateUserParams): Promise<AdminCreateUserResponse> {

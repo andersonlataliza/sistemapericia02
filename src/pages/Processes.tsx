@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Eye, Search, Plus, Save, Wallet, CalendarDays, FileText, StickyNote, Filter, X } from "lucide-react";
+import { Eye, Search, Plus, Save, Wallet, CalendarDays, FileText, StickyNote, Filter, X, Trash2, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -18,6 +18,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandShortcut } from "@/components/ui/command";
 import { Check } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { api } from "@/integrations/supabase/api";
 
 const sanitizeLawyerFromName = (name: string | undefined): string => {
   const s = String(name || "");
@@ -97,6 +109,8 @@ export default function Processes() {
   const [statusTab, setStatusTab] = useState<"pending" | "in_progress" | "completed">("in_progress");
   const [selectedCourts, setSelectedCourts] = useState<string[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [courtUsage, setCourtUsage] = useState<Record<string, number>>({});
   const courts = useMemo(() => {
     const set = new Set<string>();
@@ -432,6 +446,28 @@ export default function Processes() {
       payment_due_date: "",
     });
   };
+
+  const deleteEditingProcess = useCallback(async () => {
+    if (!editingId) return;
+    try {
+      setDeleting(true);
+      const res = await api.deleteProcess(editingId);
+      const warnings = Array.isArray((res as any)?.storageWarnings) ? (res as any).storageWarnings : [];
+      setProcesses((prev) => prev.filter((p) => p.id !== editingId));
+      setFilteredProcesses((prev) => prev.filter((p) => p.id !== editingId));
+      toast({
+        title: "Exclusão concluída",
+        description: warnings.length > 0 ? "Processo excluído, mas alguns arquivos podem não ter sido removidos." : "Processo excluído definitivamente.",
+        variant: warnings.length > 0 ? "destructive" : undefined,
+      });
+      cancelEdit();
+    } catch (e: any) {
+      toast({ title: "Erro ao excluir", description: e?.message || "Falha ao excluir o processo", variant: "destructive" });
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  }, [editingId, toast]);
 
   const saveEdit = async () => {
     if (!editingId) return;
@@ -988,6 +1024,34 @@ export default function Processes() {
                               <Button variant="ghost" onClick={cancelEdit}>
                                 Cancelar
                               </Button>
+
+
+                              <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="destructive" disabled={deleting}>
+                                    {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                    Excluir
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Excluir processo definitivamente?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Esta ação é irreversível. O processo e todos os dados relacionados serão removidos.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={deleteEditingProcess}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      disabled={deleting}
+                                    >
+                                      {deleting ? "Excluindo..." : "Excluir definitivamente"}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
                             </>
                           ) : (
                             <>

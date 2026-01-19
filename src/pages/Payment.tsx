@@ -326,6 +326,45 @@ export default function Payment() {
     });
   }, [processes, search, statusFilter]);
 
+  const receivedStats = useMemo(() => {
+    const now = new Date();
+    const nowYear = now.getFullYear();
+    const nowMonth = now.getMonth();
+
+    let receivedMonth = 0;
+    let receivedYear = 0;
+    let countMonth = 0;
+    let countYear = 0;
+
+    for (const p of processes) {
+      if ((p.payment_status || "pending") !== "paid") continue;
+      const rawAmount = p.payment_amount;
+      const amount = typeof rawAmount === "number" ? rawAmount : Number(rawAmount || 0);
+
+      const rawDate = p.payment_date;
+      if (!rawDate) continue;
+      const d = new Date(rawDate);
+      if (Number.isNaN(d.getTime())) continue;
+
+      if (d.getFullYear() === nowYear) {
+        receivedYear += amount;
+        countYear += 1;
+        if (d.getMonth() === nowMonth) {
+          receivedMonth += amount;
+          countMonth += 1;
+        }
+      }
+    }
+
+    return {
+      now,
+      receivedMonth,
+      receivedYear,
+      countMonth,
+      countYear,
+    };
+  }, [processes]);
+
   const openPayment = (p: Process) => {
     setPaymentTargetId(p.id);
     setPaymentDraft({
@@ -511,6 +550,40 @@ export default function Payment() {
               <div className="flex items-end">
                 <div className="text-sm text-muted-foreground">
                   <p><strong>{filtered.length}</strong> processo(s) encontrado(s)</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle>Dashboard</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Valores recebidos com base em pagamentos confirmados (status: Pago)
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">
+                  Recebido no mês ({receivedStats.now.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })})
+                </div>
+                <div className="mt-1 text-2xl font-semibold text-foreground">
+                  {formatCurrency(receivedStats.receivedMonth)}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {receivedStats.countMonth} pagamento(s) confirmado(s)
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Recebido no ano ({receivedStats.now.getFullYear()})</div>
+                <div className="mt-1 text-2xl font-semibold text-foreground">
+                  {formatCurrency(receivedStats.receivedYear)}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {receivedStats.countYear} pagamento(s) confirmado(s)
                 </div>
               </div>
             </div>
