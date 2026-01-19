@@ -10,8 +10,8 @@ interface FlammableDefinitionSectionProps {
 
 export default function FlammableDefinitionSection({ value, onChange }: FlammableDefinitionSectionProps) {
   const insertNR20Definition = () => {
-    const sentence = "De acordo com a NR 20, os líquidos inflamáveis possuem ponto de fulgor ≤ 60°C.";
-    onChange(value ? `${value}\n\n${sentence}` : sentence);
+    const sentence = "De acordo com a NR 20, os líquidos inflamáveis possuem ponto de fulgor de < 60°C.";
+    onChange(sentence);
   };
 
   return (
@@ -32,7 +32,7 @@ export default function FlammableDefinitionSection({ value, onChange }: Flammabl
         </div>
         <div className="flex justify-end">
           <Button type="button" variant="secondary" onClick={insertNR20Definition}>
-            Inserir referência NR-20 (ponto de fulgor ≤ 60°C)
+            Inserir referência NR-20 (ponto de fulgor {"<"} 60°C)
           </Button>
         </div>
       </CardContent>

@@ -3,7 +3,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "@/components/ui/use-toast";
 import { extractInitialByLLM } from "@/lib/llm";
@@ -12,7 +12,7 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 interface InitialDataSectionProps {
   value: string;
   onChange: (value: string) => void;
-  onTypeChange?: (value: "insalubridade" | "periculosidade" | "acidentario") => void;
+  onFlagsChange?: (flags: { show_nr15_item15?: boolean; show_nr16_item15?: boolean }) => void;
 }
 
 type ExtractType = "insalubridade" | "periculosidade" | "acidentario";
@@ -20,54 +20,60 @@ type ExtractType = "insalubridade" | "periculosidade" | "acidentario";
 function extractByType(text: string, type: ExtractType): string {
   if (!text?.trim()) return "";
 
-  const lower = text.replace(/\s+/g, " ").trim();
+  // Normaliza o texto para melhor processamento
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  
+  // Divide em parágrafos e frases
   const paragraphs = text
-    .split(/\n{2,}|\r\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
+    .split(/\n\s*\n|\r\n\s*\r\n/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter((p) => p.length > 20);
 
-  const kw = {
+  const sentences = normalizedText
+    .split(/(?<=[\.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 30);
+
+  // Palavras-chave OBRIGATÓRIAS para cada tipo
+  const requiredKeywords = {
     insalubridade: [
       "insalubridade",
-      "insalubre",
+      "insalubre", 
       "nr-15",
       "nr15",
       "adicional de insalubridade",
-      "anexo",
       "agente químico",
+      "agente físico", 
       "agente fisico",
-      "agente físico",
       "agente biológico",
       "limite de tolerância",
-      "lt",
       "ruído",
       "calor",
       "poeira",
       "solvente",
       "benzeno",
-      "epi",
-      "epc",
+      "ambiente insalubre",
+      "exposição ocupacional"
     ],
     periculosidade: [
       "periculosidade",
       "periculoso",
-      "nr-16",
+      "nr-16", 
       "nr16",
       "adicional de periculosidade",
       "inflamável",
       "explosivo",
       "energia elétrica",
-      "eletricidade",
+      "eletricidade", 
       "líquidos inflamáveis",
       "gases inflamáveis",
-      "armazenamento",
-      "manuseio",
-      "perigo",
-      "exposição periculosa",
+      "atividade perigosa",
+      "risco de explosão",
+      "exposição periculosa"
     ],
     acidentario: [
       "acidentário",
-      "acidentario",
+      "acidentario", 
       "acidentária",
       "acidente de trabalho",
       "cat",
@@ -76,51 +82,77 @@ function extractByType(text: string, type: ExtractType): string {
       "auxílio-doença",
       "auxilio-doenca",
       "ntep",
-      "doença ocupacional",
+      "doença ocupacional", 
       "doença do trabalho",
       "nexo causal",
-      "lesão",
-      "sinistro",
-      "incapacidade",
+      "incapacidade laboral",
+      "inss"
     ],
   } as const;
 
-  const keywords = kw[type].map((k) => k.toLowerCase());
+  const keywords = requiredKeywords[type].map(k => k.toLowerCase());
 
-  const hasHit = (p: string) => {
-    const l = p.toLowerCase();
-    return keywords.some((k) => l.includes(k));
+  // Função MUITO restritiva - deve conter palavra-chave obrigatória
+  const isStrictlyRelevant = (content: string): boolean => {
+    const lowerContent = content.toLowerCase();
+    
+    // DEVE conter pelo menos uma palavra-chave obrigatória
+    const hasRequiredKeyword = keywords.some(keyword => lowerContent.includes(keyword));
+    
+    if (!hasRequiredKeyword) return false;
+
+    // Exclui conteúdo que claramente não é do tipo (palavras de exclusão)
+    const exclusionWords = [
+      "valor da causa", "valor atribuído", "procedente deferindo", 
+      "r$ ", "reais", "sentença", "processo", "juiz", "tribunal",
+      "recurso", "apelação", "embargos", "decisão judicial",
+      "código civil", "clt", "artigo", "parágrafo", "inciso",
+      "documento assinado", "número do documento", "instância"
+    ];
+    
+    const hasExclusionWords = exclusionWords.some(word => lowerContent.includes(word));
+    if (hasExclusionWords) return false;
+
+    return true;
   };
 
-  const hits: string[] = [];
-  for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i];
-    if (hasHit(p)) {
-      hits.push(p);
-      const prev = paragraphs[i - 1];
-      const next = paragraphs[i + 1];
-      if (prev && prev.length < 200 && !hasHit(prev)) hits.push(prev);
-      if (next && next.length < 200 && !hasHit(next)) hits.push(next);
+  const relevantContent: string[] = [];
+
+  // Primeiro: busca em parágrafos
+  for (const paragraph of paragraphs) {
+    if (isStrictlyRelevant(paragraph)) {
+      relevantContent.push(paragraph);
     }
   }
 
-  let result = hits.filter(Boolean);
-  if (result.length === 0) {
-    const sentences = lower
-      .split(/(?<=[\.!?])\s+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    result = sentences.filter((s) => hasHit(s));
+  // Se não encontrou parágrafos relevantes, busca em frases
+  if (relevantContent.length === 0) {
+    for (const sentence of sentences) {
+      if (isStrictlyRelevant(sentence)) {
+        relevantContent.push(sentence);
+      }
+    }
   }
 
-  if (result.length === 0) return "";
+  // Remove duplicatas e limita o tamanho
+  const uniqueContent = Array.from(new Set(relevantContent))
+    .filter(content => content.length > 50) // Conteúdo substancial
+    .sort((a, b) => {
+      // Ordena por quantidade de palavras-chave encontradas
+      const aMatches = keywords.filter(k => a.toLowerCase().includes(k)).length;
+      const bMatches = keywords.filter(k => b.toLowerCase().includes(k)).length;
+      return bMatches - aMatches;
+    })
+    .slice(0, 5); // Máximo 5 trechos mais relevantes
+
+  if (uniqueContent.length === 0) return "";
 
   const header = `Trechos extraídos (tipo: ${type})`;
-  return [header, "", ...Array.from(new Set(result))].join("\n\n");
+  return [header, "", ...uniqueContent].join("\n\n");
 }
 
-export default function InitialDataSection({ value, onChange }: InitialDataSectionProps) {
-  const [extractType, setExtractType] = useState<ExtractType>("insalubridade");
+export default function InitialDataSection({ value, onChange, onFlagsChange }: InitialDataSectionProps) {
+  const [extractTypes, setExtractTypes] = useState<ExtractType[]>(["insalubridade"]);
   const [rawText, setRawText] = useState<string>("");
   const [testing, setTesting] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -130,6 +162,15 @@ export default function InitialDataSection({ value, onChange }: InitialDataSecti
   const [statusLabel, setStatusLabel] = useState<string>("");
   const indeterminateTimerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
+
+  const extractByTypes = (text: string, types: ExtractType[]): string => {
+    const sanitizedTypes = Array.from(new Set(types));
+    if (sanitizedTypes.length === 0) return "";
+    const parts = sanitizedTypes
+      .map((t) => extractByType(text, t))
+      .filter((p) => p && p.trim().length > 0);
+    return parts.join("\n\n---\n\n");
+  };
 
   const cancelExtraction = async () => {
     cancelRef.current = true;
@@ -155,7 +196,6 @@ export default function InitialDataSection({ value, onChange }: InitialDataSecti
     let fullText = "";
     try {
       const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
-      // @ts-expect-error - pdfjs types
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl as any;
       const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
       loadingTaskRef.current = loadingTask;
@@ -208,10 +248,15 @@ export default function InitialDataSection({ value, onChange }: InitialDataSecti
 
       let extracted = "";
       try {
-        const llmExtracted = await extractInitialByLLM(text, extractType);
-        extracted = llmExtracted ?? extractByType(text, extractType);
+        const chunks: string[] = [];
+        for (const t of extractTypes) {
+          const llmExtracted = await extractInitialByLLM(text, t);
+          const filteredLLM = llmExtracted ? extractByType(llmExtracted, t) : "";
+          chunks.push(filteredLLM || extractByType(text, t));
+        }
+        extracted = chunks.filter((c) => c && c.trim()).join("\n\n---\n\n");
       } catch {
-        extracted = extractByType(text, extractType);
+        extracted = extractByTypes(text, extractTypes);
       }
 
       if (!extracted) {
@@ -270,7 +315,11 @@ export default function InitialDataSection({ value, onChange }: InitialDataSecti
       });
       return;
     }
-    const extracted = extractByType(rawText, extractType);
+    if (extractTypes.length === 0) {
+      toast({ title: "Seleção vazia", description: "Selecione um ou mais tipos." });
+      return;
+    }
+    const extracted = extractByTypes(rawText, extractTypes);
     if (!extracted) {
       toast({
         title: "Nenhum trecho detectado",
@@ -382,10 +431,15 @@ export default function InitialDataSection({ value, onChange }: InitialDataSecti
 
       let extracted = "";
       try {
-        const llmExtracted = await extractInitialByLLM(text, extractType);
-        extracted = llmExtracted ?? extractByType(text, extractType);
+        const chunks: string[] = [];
+        for (const t of extractTypes) {
+          const llmExtracted = await extractInitialByLLM(text, t);
+          const filteredLLM = llmExtracted ? extractByType(llmExtracted, t) : "";
+          chunks.push(filteredLLM || extractByType(text, t));
+        }
+        extracted = chunks.filter((c) => c && c.trim()).join("\n\n---\n\n");
       } catch {
-        extracted = extractByType(text, extractType);
+        extracted = extractByTypes(text, extractTypes);
       }
 
       if (!extracted) {
@@ -412,52 +466,68 @@ export default function InitialDataSection({ value, onChange }: InitialDataSecti
       <CardContent className="space-y-6">
         <div className="space-y-2">
           <Label>O que deve ser extraído?</Label>
-          <RadioGroup
-            value={extractType}
-            onValueChange={(val) => {
-              const t = val as ExtractType;
-              setExtractType(t);
-              onTypeChange?.(t);
-            }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-2"
-          >
-            <div className="flex items-center space-x-2 border rounded p-2">
-              <RadioGroupItem value="insalubridade" id="ini-insal" />
-              <Label htmlFor="ini-insal">Insalubridade</Label>
-            </div>
-            <div className="flex items-center space-x-2 border rounded p-2">
-              <RadioGroupItem value="periculosidade" id="ini-peri" />
-              <Label htmlFor="ini-peri">Periculosidade</Label>
-            </div>
-            <div className="flex items-center space-x-2 border rounded p-2">
-              <RadioGroupItem value="acidentario" id="ini-aci" />
-              <Label htmlFor="ini-aci">Acidentário</Label>
-            </div>
-          </RadioGroup>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <label className="flex items-center space-x-2 border rounded p-2">
+              <Checkbox
+                checked={extractTypes.includes("insalubridade")}
+                onCheckedChange={(checked) => {
+                  setExtractTypes((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add("insalubridade");
+                    else next.delete("insalubridade");
+                    return Array.from(next);
+                  });
+                  if (typeof checked === "boolean") {
+                    onFlagsChange?.({ show_nr15_item15: checked });
+                  }
+                }}
+              />
+              <span>Insalubridade</span>
+            </label>
+            <label className="flex items-center space-x-2 border rounded p-2">
+              <Checkbox
+                checked={extractTypes.includes("periculosidade")}
+                onCheckedChange={(checked) => {
+                  setExtractTypes((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add("periculosidade");
+                    else next.delete("periculosidade");
+                    return Array.from(next);
+                  });
+                  if (typeof checked === "boolean") {
+                    onFlagsChange?.({ show_nr16_item15: checked });
+                  }
+                }}
+              />
+              <span>Periculosidade</span>
+            </label>
+            <label className="flex items-center space-x-2 border rounded p-2">
+              <Checkbox
+                checked={extractTypes.includes("acidentario")}
+                onCheckedChange={(checked) => {
+                  setExtractTypes((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add("acidentario");
+                    else next.delete("acidentario");
+                    return Array.from(next);
+                  });
+                }}
+              />
+              <span>Acidentário</span>
+            </label>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Se configurado, usa LLM para extração; caso contrário, heurística local. O arquivo não é salvo; apenas os trechos identificados são inseridos abaixo. Aceita PDF, DOCX e TXT.
+            Selecione um ou mais tipos. Se configurado, usa LLM para extração; caso contrário, heurística local. O arquivo não é salvo; apenas os trechos identificados são inseridos abaixo. Aceita PDF, DOCX e TXT.
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="rawInitial">Colar texto da inicial (não salvo)</Label>
-          <Textarea
-            id="rawInitial"
-            value={rawText}
-            onChange={(e) => setRawText(e.target.value)}
-            placeholder="Cole aqui o texto integral da inicial para extração..."
-            className="min-h-[120px] mt-2"
-          />
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={handleBulkExtract}>
-              Extrair do texto colado
-            </Button>
-            <Button type="button" variant="secondary" onClick={handleTestPdf} disabled={testing || isExtracting}>
-              {testing || isExtracting ? "Testando PDF..." : "Testar com PDF de exemplo"}
-            </Button>
-            <Button type="button" variant="outline" onClick={cancelExtraction} disabled={!isExtracting}>
-              Cancelar extração
-            </Button>
+            {isExtracting && (
+              <Button type="button" variant="outline" onClick={cancelExtraction}>
+                Cancelar extração
+              </Button>
+            )}
             <div className="flex items-center gap-2">
               <Input type="file" accept=".txt,.docx,.pdf" onChange={handleFileInput} disabled={isExtracting} />
             </div>

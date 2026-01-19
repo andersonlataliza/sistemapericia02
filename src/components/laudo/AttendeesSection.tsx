@@ -1,11 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { toast } from "@/components/ui/use-toast";
-import { extractAttendeesFromAudioLLM } from "@/lib/llm";
+import { extractAttendeesFromAudioLLM, transcribeAudioLLM } from "@/lib/llm";
 
 interface Attendee {
   name: string;
@@ -17,9 +18,10 @@ interface Attendee {
 interface AttendeesSectionProps {
   value: Attendee[];
   onChange: (value: Attendee[]) => void;
+  processId?: string;
 }
 
-export default function AttendeesSection({ value, onChange }: AttendeesSectionProps) {
+export default function AttendeesSection({ value, onChange, processId: _processId }: AttendeesSectionProps) {
   const attendees = value || [];
 
   const addAttendee = () => {
@@ -36,68 +38,9 @@ export default function AttendeesSection({ value, onChange }: AttendeesSectionPr
     onChange(updated);
   };
 
-  const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusLabel, setStatusLabel] = useState("");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-      recorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        chunksRef.current = [];
-        await processAudioBlob(blob);
-        try { stream.getTracks().forEach((t) => t.stop()); } catch {}
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecording(true);
-      setStatusLabel("Gravando áudio...");
-    } catch (err: any) {
-      toast({ title: "Falha ao acessar microfone", description: err?.message ?? "Verifique permissões de áudio.", variant: "destructive" });
-    }
-  };
-
-  const stopRecording = () => {
-    try {
-      mediaRecorderRef.current?.stop();
-    } catch {}
-    setIsRecording(false);
-    setStatusLabel("");
-  };
-
-  const processAudioBlob = async (blob: Blob) => {
-    setIsProcessing(true);
-    setStatusLabel("Processando áudio...");
-    try {
-      const file = new File([blob], `gravacao-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
-      const items = await extractAttendeesFromAudioLLM(file);
-      if (!items || items.length === 0) {
-        toast({ title: "Audio LLM não configurado", description: "Defina VITE_LLM_AUDIO_ACTIVITIES_URL no .env", variant: "destructive" });
-        return;
-      }
-      const newEntries = items.map((n) => ({ name: n, function: "", company: "", obs: "" }));
-      onChange([...
-        attendees,
-        ...newEntries,
-      ]);
-      toast({ title: "Entrevistados extraídos", description: "Pessoas adicionadas a partir do áudio gravado." });
-    } catch (err: any) {
-      toast({ title: "Falha ao processar áudio", description: err?.message ?? "Não foi possível extrair entrevistados.", variant: "destructive" });
-    } finally {
-      setIsProcessing(false);
-      setStatusLabel("");
-    }
-  };
+  const [transcriptionText, setTranscriptionText] = useState<string>("");
 
   const handleAudioFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -106,16 +49,25 @@ export default function AttendeesSection({ value, onChange }: AttendeesSectionPr
     setIsProcessing(true);
     setStatusLabel("Processando arquivo de áudio...");
     try {
+      const text = await transcribeAudioLLM(file);
+      if (text && text.trim()) {
+        setTranscriptionText(text.trim());
+        const names = extractNamesFromText(text);
+        if (names.length > 0) {
+          const newEntries = names.map((n) => ({ name: n, function: "", company: "", obs: "" }));
+          onChange([...attendees, ...newEntries]);
+          toast({ title: "Pessoas extraídas do texto", description: "Nomes adicionados a partir do áudio." });
+          return;
+        }
+      }
+
       const items = await extractAttendeesFromAudioLLM(file);
       if (!items || items.length === 0) {
         toast({ title: "Audio LLM não configurado", description: "Defina VITE_LLM_AUDIO_ACTIVITIES_URL no .env", variant: "destructive" });
         return;
       }
       const newEntries = items.map((n) => ({ name: n, function: "", company: "", obs: "" }));
-      onChange([...
-        attendees,
-        ...newEntries,
-      ]);
+      onChange([...attendees, ...newEntries]);
       toast({ title: "Entrevistados extraídos", description: "Pessoas adicionadas a partir do áudio." });
     } catch (err: any) {
       toast({ title: "Falha ao processar áudio", description: err?.message ?? "Não foi possível extrair entrevistados.", variant: "destructive" });
@@ -124,6 +76,18 @@ export default function AttendeesSection({ value, onChange }: AttendeesSectionPr
       setStatusLabel("");
     }
   };
+
+  // Heurística simples para extrair nomes de um texto transcrito.
+  function extractNamesFromText(text: string): string[] {
+    const candidates = text
+      .split(/[,\n;]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 2);
+    const nameLike = candidates.filter((s) => /[A-Za-zÀ-ÿ]{2,}\s+[A-Za-zÀ-ÿ]{2,}/.test(s));
+    // Deduplicar e normalizar
+    const unique = Array.from(new Set(nameLike.map((s) => s.replace(/\s+/g, ' ').trim())));
+    return unique.slice(0, 10);
+  }
 
   return (
     <Card className="shadow-card">
@@ -141,14 +105,17 @@ export default function AttendeesSection({ value, onChange }: AttendeesSectionPr
         <div className="space-y-2">
           <Label>Extrair a partir de áudio (LLM)</Label>
           <div className="flex flex-wrap gap-2 items-center">
-            <Button type="button" onClick={isRecording ? stopRecording : startRecording} variant={isRecording ? "destructive" : "secondary"} disabled={isProcessing}>
-              {isRecording ? "Parar gravação" : "Gravar áudio"}
-            </Button>
-            <Input type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm" onChange={handleAudioFile} disabled={isRecording || isProcessing} />
-            { (isRecording || isProcessing) && (
-              <span className="text-xs text-muted-foreground">{statusLabel || (isRecording ? "Gravando..." : "Processando...")}</span>
+            <Input type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm" onChange={handleAudioFile} disabled={isProcessing} />
+            {isProcessing && (
+              <span className="text-xs text-muted-foreground">{statusLabel || "Processando..."}</span>
             )}
           </div>
+          { transcriptionText && (
+            <div className="mt-2">
+              <Label className="text-xs">Transcrição do áudio</Label>
+              <Textarea value={transcriptionText} onChange={(e) => setTranscriptionText(e.target.value)} className="min-h-[80px] mt-1" />
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             Se configurado, o arquivo é enviado ao endpoint LLM para transcrição e extração de nomes de entrevistados. O áudio não é salvo.
           </p>

@@ -216,22 +216,33 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 
 export async function extractDocumentTextOCR(file: File): Promise<string | null> {
   try {
-    const endpoint = (import.meta as any).env?.VITE_OCR_URL;
-    if (endpoint) {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(endpoint, { method: "POST", body: form });
-      if (!res.ok) return null;
-      const data = await res.json().catch(() => ({} as any));
-      const text: unknown = (data?.text as unknown) ?? (data?.content as unknown) ?? (Array.isArray(data?.paragraphs) ? (data.paragraphs as string[]).join("\n\n") : null);
-      if (typeof text === "string" && text.trim()) return text.trim();
+    const lowerName = file.name.toLowerCase();
+    const isTxt = file.type === "text/plain" || lowerName.endsWith(".txt");
+    const isDocx =
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || lowerName.endsWith(".docx");
+    const isPdf = file.type === "application/pdf" || lowerName.endsWith(".pdf");
+
+    if (isTxt) {
+      const text = (await file.text()).trim();
+      return text || null;
     }
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+    if (isDocx) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const mammoth = await import("mammoth");
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        const text = String(result?.value || "").trim();
+        return text || null;
+      } catch {
+        return null;
+      }
+    }
+
     if (isPdf) {
       const arrayBuffer = await file.arrayBuffer();
       const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
-      // @ts-expect-error - pdfjs types
-      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl as any;
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
       let fullText = "";
@@ -242,7 +253,57 @@ export async function extractDocumentTextOCR(file: File): Promise<string | null>
         fullText += pageText + "\n\n";
       }
       const text = fullText.trim();
-      return text || null;
+      if (text) return text;
+    }
+
+    const endpoint = (import.meta as any).env?.VITE_OCR_URL;
+    if (endpoint) {
+      const disabled = (() => {
+        try {
+          return localStorage.getItem("ocr_endpoint_disabled") === "1";
+        } catch {
+          return false;
+        }
+      })();
+
+      if (!disabled) {
+        const shouldTry = (() => {
+          try {
+            const url = new URL(String(endpoint), window.location.href);
+            const host = url.hostname;
+            const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+            if (!isLocal) return true;
+            const current = window.location.hostname;
+            return current === "localhost" || current === "127.0.0.1" || current === "::1";
+          } catch {
+            return true;
+          }
+        })();
+
+        if (shouldTry) {
+          try {
+            const form = new FormData();
+            form.append("file", file);
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(endpoint, { method: "POST", body: form, signal: controller.signal });
+            window.clearTimeout(timeout);
+            if (res.ok) {
+              const data = await res.json().catch(() => ({} as any));
+              const text: unknown =
+                (data?.text as unknown) ??
+                (data?.content as unknown) ??
+                (Array.isArray(data?.paragraphs) ? (data.paragraphs as string[]).join("\n\n") : null);
+              if (typeof text === "string" && text.trim()) return text.trim();
+            }
+          } catch {
+            try {
+              localStorage.setItem("ocr_endpoint_disabled", "1");
+            } catch {
+            }
+          }
+        }
+      }
     }
     return null;
   } catch {
@@ -267,7 +328,12 @@ export async function evaluateEpiReplacementPeriodByLLM(text: string, epis: EPII
       `- Identifique periodicidade sugerida pelo documento. Caso ausente, proponha periodicidade com base em boas práticas.\n` +
       `- Considere o CA, vida útil e condições de uso/limpeza/manutenção.\n` +
       `- Cite fundamentação normativa: “Conforme a Portaria nº 3214/78 e a NR-6”.\n` +
-      `- Formate em seções: Normas; Itens avaliados; Periodicidade recomendada; Observações.\n`
+      `- Formate em seções: Normas; Itens avaliados; Periodicidade recomendada; Observações.\n` +
+      `- Ao final, inclua uma linha exatamente com: DADOS_EPI_JSON: <json>\n` +
+      `- O <json> deve ser um JSON válido (sem markdown e sem texto extra) no formato:\n` +
+      `  {"epis":[{"equipment":"string","ca":"string","protection":"string?","deliveries":["YYYY-MM-DD", "YYYY-MM-DD"]}]}\n` +
+      `- Extraia entregas do documento (datas e CAs). Se não houver datas, use deliveries: [].\n` +
+      `- Não invente entregas: se não estiver no documento, deixe deliveries vazio.\n`
     );
 
     const res = await fetch(endpoint, {
@@ -322,4 +388,73 @@ export async function evaluateEpiUsageByLLM(activitiesText: string, epis: EPIInp
   } catch {
     return null;
   }
+}
+
+/**
+ * Calls a configurable LLM-backed endpoint to proofread and improve a Portuguese text.
+ * Typical use: spelling/grammar correction and clarity improvements for "Descrição detalhada das atividades".
+ *
+ * Expected response: { content: string } | { text: string } | { paragraphs: string[] }
+ */
+export async function proofreadTextLLM(text: string): Promise<string | null> {
+  const envEndpoint = (import.meta as any).env?.VITE_LLM_TEXT_PROOFREAD_URL;
+  const defaultStub = (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"))
+    ? "http://localhost:4000/proofread"
+    : null;
+  const endpoint = envEndpoint || defaultStub;
+  if (!endpoint) return null;
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeout = (() => {
+    if (!controller) return null;
+    if (typeof window === "undefined" || typeof window.setTimeout !== "function") return null;
+    return window.setTimeout(() => controller.abort(), 20000);
+  })();
+
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang: "pt-BR", task: "proofread" }),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+  } catch (error: any) {
+    const isAbort = String(error?.name || "").toLowerCase() === "aborterror";
+    throw new Error(isAbort ? "Tempo esgotado ao contatar o serviço de revisão." : "Não foi possível contatar o serviço de revisão.");
+  } finally {
+    if (timeout) {
+      try {
+        window.clearTimeout(timeout);
+      } catch {
+      }
+    }
+  }
+
+  if (!res.ok) {
+    throw new Error(`Falha no serviço de revisão (HTTP ${res.status}).`);
+  }
+
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Resposta inválida do serviço de revisão.");
+  }
+
+  const content: unknown =
+    (data?.content as unknown) ??
+    (data?.text as unknown) ??
+    (data?.result as unknown) ??
+    (data?.output as unknown) ??
+    (data?.reviewed_text as unknown) ??
+    (data?.revised_text as unknown) ??
+    (data?.reviewed as unknown) ??
+    (Array.isArray(data?.paragraphs) ? (data.paragraphs as string[]).join("\n\n") : null);
+
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error("Resposta do serviço de revisão em formato inesperado.");
+  }
+
+  return content.trim();
 }

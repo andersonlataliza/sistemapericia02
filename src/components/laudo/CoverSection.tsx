@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,11 @@ interface CoverSectionProps {
   value: CoverData;
   onChange: (value: CoverData) => void;
   identifications?: IdentificationData;
+  processMeta?: {
+    inspection_date?: string | null;
+    inspection_address?: string | null;
+    inspection_city?: string | null;
+  };
 }
 
 function formatDatePtBr(dateStr?: string) {
@@ -38,8 +43,22 @@ function formatDatePtBr(dateStr?: string) {
   }
 }
 
-export default function CoverSection({ value, onChange, identifications }: CoverSectionProps) {
+export default function CoverSection({ value, onChange, identifications, processMeta }: CoverSectionProps) {
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [linkedLoaded, setLinkedLoaded] = useState(false);
+  
+  // Memoize onChange para evitar re-renders desnecessários
+  const memoizedOnChange = useCallback(onChange, []);
+  
+  // Preenche automaticamente o cabeçalho do juízo com base na Vara da aba Processo/Identificações,
+  // apenas quando o campo está vazio (não sobrescreve edições manuais)
+  useEffect(() => {
+    const court = (identifications?.court || "").trim();
+    const current = (value.judgeCourtLine || "").trim();
+    if (court && !current) {
+      memoizedOnChange({ ...value, judgeCourtLine: `Excelentíssimo Senhor Doutor Juiz da ${court}.` });
+    }
+  }, [identifications?.court, value.judgeCourtLine]); // Removido onChange das dependências
 
   useEffect(() => {
     const loadProfileDefaults = async () => {
@@ -54,7 +73,7 @@ export default function CoverSection({ value, onChange, identifications }: Cover
           if (!next.registrationNumber && data.registration_number) next.registrationNumber = data.registration_number;
           if (!next.honorarios) next.honorarios = "03 (três) salários mínimos";
           if (!next.coverDate) next.coverDate = new Date().toISOString().substring(0, 10);
-          onChange(next);
+          memoizedOnChange(next);
         }
       } finally {
         setProfileLoaded(true);
@@ -65,7 +84,99 @@ export default function CoverSection({ value, onChange, identifications }: Cover
     if (!profileLoaded && (!value.peritoName || !value.professionalTitle || !value.registrationNumber)) {
       loadProfileDefaults();
     }
-  }, [profileLoaded, value, onChange]);
+  }, [profileLoaded, value.peritoName, value.professionalTitle, value.registrationNumber]); // Removido 'value' e 'onChange' completos
+
+  // Prefill city and date from process meta when available
+  useEffect(() => {
+    try {
+      if (!processMeta) return;
+      const next: CoverData = { ...value };
+      let hasChanges = false;
+      
+      if (!next.coverDate && processMeta.inspection_date) {
+        try {
+          const d = new Date(processMeta.inspection_date);
+          next.coverDate = d.toISOString().substring(0, 10);
+          hasChanges = true;
+        } catch {}
+      }
+      if (!next.city) {
+        const cityDirect = (processMeta.inspection_city || "").trim();
+        if (cityDirect) {
+          next.city = cityDirect;
+          hasChanges = true;
+        } else if (processMeta.inspection_address) {
+          const extractCityFromAddress = (address: string) => {
+            const cleaned = String(address || "").trim();
+            if (!cleaned) return "";
+            const parts = cleaned.split(",").map((p) => p.trim()).filter(Boolean);
+            const last = parts.length > 0 ? parts[parts.length - 1] : cleaned;
+            const re = /^([A-Za-zÀ-ÿ'\s]+)\s*(?:-|\/)\s*([A-Z]{2})$/;
+            const m = last.match(re);
+            if (m) return m[1].trim();
+            if (last.includes("-")) return last.split("-")[0].trim();
+            if (last.includes("/")) return last.split("/")[0].trim();
+            return last;
+          };
+          const extractedCity = extractCityFromAddress(String(processMeta.inspection_address));
+          if (extractedCity) {
+            next.city = extractedCity;
+            hasChanges = true;
+          }
+        }
+      }
+      if (hasChanges) {
+        memoizedOnChange(next);
+      }
+    } catch {}
+  }, [processMeta?.inspection_date, processMeta?.inspection_city, processMeta?.inspection_address, value.coverDate, value.city]); // Dependências específicas
+
+  // Fallback to professional data from linked users when profile is incomplete
+  useEffect(() => {
+    const loadLinkedProfessional = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from("linked_users")
+          .select("linked_user_name, permissions")
+          .eq("owner_user_id", user.id);
+        if (!data || data.length === 0) return;
+
+        const candidate = (data as any[]).find((u) => {
+          const prof = u.permissions?.professional || {};
+          return (prof.profession || prof.council_number || prof.council_registry);
+        });
+        if (!candidate) return;
+
+        const prof = candidate.permissions?.professional || {};
+        const next: CoverData = { ...value };
+        let hasChanges = false;
+        
+        if (!next.peritoName && candidate.linked_user_name) {
+          next.peritoName = candidate.linked_user_name;
+          hasChanges = true;
+        }
+        if (!next.professionalTitle && prof.profession) {
+          next.professionalTitle = prof.profession;
+          hasChanges = true;
+        }
+        if (!next.registrationNumber && (prof.council_number || prof.council_registry)) {
+          next.registrationNumber = prof.council_number || prof.council_registry;
+          hasChanges = true;
+        }
+        if (hasChanges) {
+          memoizedOnChange(next);
+        }
+      } finally {
+        setLinkedLoaded(true);
+      }
+    };
+
+    if (!linkedLoaded && (!value.peritoName || !value.professionalTitle || !value.registrationNumber)) {
+      loadLinkedProfessional();
+    }
+  }, [linkedLoaded, value.peritoName, value.professionalTitle, value.registrationNumber]); // Dependências específicas
 
   const updateField = (field: keyof CoverData, fieldValue: string) => {
     onChange({ ...value, [field]: fieldValue });

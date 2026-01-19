@@ -5,12 +5,38 @@ const multer = require('multer');
 const app = express();
 const port = 4000;
 
-app.use(cors({ origin: 'http://localhost:8081' }));
+// Allow all local origins during development (Vite preview may run on 8081/8082)
+app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+// Text proofreading endpoint
+app.post('/proofread', (req, res) => {
+  const { text, lang, task } = req.body || {};
+  const input = typeof text === 'string' ? text : '';
+  // Very simple mock: trim, collapse spaces, ensure sentences end with period
+  const normalized = input
+    .replace(/[\t\r]+/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+  const sentences = normalized
+    .split(/([.!?])\s+/)
+    .reduce((acc, cur, i, arr) => {
+      // Join tokenized punctuation with previous segment
+      if (/[.!?]/.test(cur) && acc.length > 0) {
+        acc[acc.length - 1] = acc[acc.length - 1] + cur;
+      } else if (cur && !/[.!?]/.test(cur)) {
+        acc.push(cur.charAt(0).toUpperCase() + cur.slice(1));
+      }
+      return acc;
+    }, []);
+  const output = sentences.map(s => s.endsWith('.') || s.endsWith('!') || s.endsWith('?') ? s : (s + '.')).join(' ');
+  return res.json({ content: output, lang: lang || 'pt-BR', task: task || 'proofread' });
+});
+
 app.post('/audio-activities', upload.single('file'), (req, res) => {
+  console.log('POST /audio-activities - Task:', req.body?.task, '- File:', req.file?.originalname);
   const task = req.body?.task || 'activities';
   if (task === 'activities') {
     const content = [
@@ -37,7 +63,7 @@ app.post('/epi-usage', (req, res) => {
   return res.json({ content });
 });
 
-app.post('/ocr', upload.single('file'), (req, res) => {
+app.post('/ocr', upload.single('file'), (_req, res) => {
   const text = 'Texto OCR simulado: Procedimentos indicam inspeção semanal dos protetores auriculares e substituição trimestral das luvas nitrílicas.';
   return res.json({ text });
 });
@@ -78,6 +104,7 @@ O supervisor informou que a empresa realiza treinamentos mensais sobre o uso cor
   res.json({ transcription: mockTranscription });
 });
 
-app.listen(port, () => {
-  console.log(`LLM stub server listening on http://localhost:${port}`);
+// Explicitly bind to all interfaces so clients on the LAN can reach it
+app.listen(port, '0.0.0.0', () => {
+  console.log(`LLM stub server listening on 0.0.0.0:${port}`);
 });

@@ -1,43 +1,44 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, getAuthenticatedUser } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import Navbar from "@/components/layout/Navbar";
 import StatsCard from "@/components/dashboard/StatsCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileText, Clock, CheckCircle, AlertCircle, Eye } from "lucide-react";
+import { FileText, Clock, CheckCircle, AlertCircle, Eye, TrendingUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useProcessStatistics } from "@/hooks/use-api";
 
-interface Process {
-  id: string;
-  process_number: string;
-  claimant_name: string;
-  defendant_name: string;
-  status: string;
-  inspection_date: string | null;
-  created_at: string;
-}
+// Sanitização: remove trechos "ADVOGADO:"/"ADVOGADA:" acoplados ao nome
+const sanitizeLawyerFromName = (name: any): string => {
+  const s = String(name || "");
+  return s
+    .replace(/\bADVOGAD[OA]\s*:\s*[^\n]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+};
+
+type Process = Tables<'processes'> & {
+  _is_linked?: boolean;
+  _linked_permissions?: any;
+};
 
 export default function Dashboard() {
   const [processes, setProcesses] = useState<Process[]>([]);
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    in_progress: 0,
-    completed: 0,
-  });
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-const { toast } = useToast();
-const [editingId, setEditingId] = useState<string | null>(null);
-const [editDraft, setEditDraft] = useState({
-  process_number: "",
-  claimant_name: "",
-  defendant_name: "",
-  inspection_date: ""
-});
+  const { toast } = useToast();
+  const { statistics, loading: statsLoading, refetch: refetchStats } = useProcessStatistics();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({
+    process_number: "",
+    claimant_name: "",
+    defendant_name: "",
+    inspection_date: ""
+  });
 
 const startEdit = (p: Process) => {
   setEditingId(p.id);
@@ -69,7 +70,7 @@ const saveEdit = async () => {
     const updatePayload = {
       process_number: editDraft.process_number,
       claimant_name: editDraft.claimant_name,
-      defendant_name: editDraft.defendant_name,
+      defendant_name: sanitizeLawyerFromName(editDraft.defendant_name),
       inspection_date: editDraft.inspection_date ? new Date(editDraft.inspection_date).toISOString() : null,
     };
 
@@ -105,42 +106,73 @@ const saveEdit = async () => {
 
   const fetchProcesses = async () => {
     try {
-      const { data, error } = await supabase
+      const user = await getAuthenticatedUser();
+      if (!user) {
+        toast({
+          title: "Sessão expirada",
+          description: "Faça login novamente para carregar seus processos.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Buscar processos próprios do usuário (limitado a 5 para o dashboard)
+      const { data: ownProcesses, error: ownError } = await supabase
         .from("processes")
         .select("*")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(5);
 
-      if (error) throw error;
+      if (ownError) throw ownError;
 
-      setProcesses(data || []);
+      // Buscar processos acessíveis através de usuários vinculados (somente se CPF estiver disponível)
+      const userCpf = (user.user_metadata && typeof user.user_metadata.cpf === 'string') ? user.user_metadata.cpf : null;
+      const { data: linkedAccess, error: linkedError } = userCpf
+        ? await supabase
+            .from("linked_users")
+            .select(`
+              id,
+              owner_user_id,
+              permissions,
+              process_access!inner(
+                process_id,
+                processes!inner(*)
+              )
+            `)
+            .eq("linked_user_cpf", userCpf)
+            .eq("status", "active")
+        : { data: [], error: null } as any;
 
-      // Calcular estatísticas
-      const { count: totalCount } = await supabase
-        .from("processes")
-        .select("*", { count: "exact", head: true });
+      if (linkedError && linkedError.code !== 'PGRST116') {
+        console.warn("Erro ao buscar processos vinculados:", linkedError);
+      }
 
-      const { count: pendingCount } = await supabase
-        .from("processes")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "pending");
+      // Combinar processos próprios com processos acessíveis
+      let allProcesses = ownProcesses || [];
+      
+      if (linkedAccess && linkedAccess.length > 0) {
+        const linkedProcesses = linkedAccess.flatMap(access => 
+          access.process_access?.map(pa => ({
+            ...(pa.processes as any),
+            _is_linked: true,
+            _linked_permissions: access.permissions
+          })) || []
+        );
+        
+        // Evitar duplicatas e limitar a 5 processos no total
+        const ownProcessIds = new Set(allProcesses.map(p => p.id));
+        const uniqueLinkedProcesses = linkedProcesses.filter(p => !ownProcessIds.has(p.id));
+        
+        allProcesses = [...allProcesses, ...uniqueLinkedProcesses]
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 5); // Limitar a 5 processos para o dashboard
+      }
 
-      const { count: inProgressCount } = await supabase
-        .from("processes")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "in_progress");
-
-      const { count: completedCount } = await supabase
-        .from("processes")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "completed");
-
-      setStats({
-        total: totalCount || 0,
-        pending: pendingCount || 0,
-        in_progress: inProgressCount || 0,
-        completed: completedCount || 0,
-      });
+      setProcesses(allProcesses);
+      
+      // Recarregar estatísticas após buscar processos
+      refetchStats();
     } catch (error) {
       console.error("Erro ao buscar processos:", error);
     } finally {
@@ -152,6 +184,7 @@ const saveEdit = async () => {
     const statusConfig = {
       pending: { label: "Pendente", variant: "secondary" as const },
       in_progress: { label: "Em Andamento", variant: "default" as const },
+      active: { label: "Em Andamento", variant: "default" as const },
       completed: { label: "Concluído", variant: "default" as const },
       cancelled: { label: "Cancelado", variant: "destructive" as const },
     };
@@ -165,7 +198,7 @@ const saveEdit = async () => {
     return new Date(dateString).toLocaleDateString("pt-BR");
   };
 
-  if (loading) {
+  if (loading || statsLoading) {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
@@ -188,11 +221,49 @@ const saveEdit = async () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatsCard title="Total de Processos" value={stats.total} icon={FileText} />
-          <StatsCard title="Pendentes" value={stats.pending} icon={Clock} />
-          <StatsCard title="Em Andamento" value={stats.in_progress} icon={AlertCircle} />
-          <StatsCard title="Concluídos" value={stats.completed} icon={CheckCircle} />
+          <StatsCard title="Total de Processos" value={statistics?.total || 0} icon={FileText} />
+          <StatsCard title="Pendentes" value={statistics?.pending || 0} icon={Clock} />
+          <StatsCard title="Em Andamento" value={statistics?.in_progress || 0} icon={AlertCircle} />
+          <StatsCard title="Concluídos" value={statistics?.completed || 0} icon={CheckCircle} />
         </div>
+
+        {/* Nova seção de estatísticas avançadas */}
+        {statistics && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="shadow-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5" />
+                  Taxa de Conclusão
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-primary">
+                  {Number(statistics?.completion_rate ?? 0).toFixed(1)}%
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Percentual de processos concluídos
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card">
+              <CardHeader>
+                <CardTitle>Estatísticas Mensais</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {(statistics?.monthly ?? []).slice(-3).map((month, index) => (
+                    <div key={index} className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">{month.month}</span>
+                      <span className="font-semibold">{month.count} processos</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         <Card className="shadow-card">
           <CardHeader>
@@ -256,7 +327,14 @@ const saveEdit = async () => {
                     ) : (
                       <>
                         <div className="space-y-1">
-                          <p className="font-medium">{process.process_number}</p>
+                          <div className="flex items-center space-x-2">
+                            <p className="font-medium">{process.process_number}</p>
+                            {(process as any)._is_linked && (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
+                                Vinculado
+                              </Badge>
+                            )}
+                          </div>
                           <p className="text-sm text-muted-foreground">
                             {process.claimant_name} vs {process.defendant_name}
                           </p>

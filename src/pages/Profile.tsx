@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, getAuthenticatedUser } from "@/integrations/supabase/client";
 import Navbar from "@/components/layout/Navbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+ 
 
 export default function Profile() {
   const [loading, setLoading] = useState(false);
@@ -15,6 +16,10 @@ export default function Profile() {
   const [registrationNumber, setRegistrationNumber] = useState("");
   const [phone, setPhone] = useState("");
   const { toast } = useToast();
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   useEffect(() => {
     fetchProfile();
@@ -22,7 +27,7 @@ export default function Profile() {
 
   const fetchProfile = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getAuthenticatedUser();
       if (!user) throw new Error("Usuário não autenticado");
 
       setEmail(user.email || "");
@@ -51,7 +56,7 @@ export default function Profile() {
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getAuthenticatedUser();
       if (!user) throw new Error("Usuário não autenticado");
 
       const { error } = await supabase
@@ -158,6 +163,82 @@ export default function Profile() {
                   {loading ? "Salvando..." : "Salvar Alterações"}
                 </Button>
               </form>
+            </CardContent>
+          </Card>
+
+ 
+
+          <Card className="shadow-card" id="alterar-senha">
+            <CardHeader>
+              <CardTitle>Alterar Senha</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="currentPassword">Senha Atual</Label>
+                  <Input
+                    id="currentPassword"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Digite sua senha atual"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword">Nova Senha</Label>
+                  <Input
+                    id="newPassword"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Digite a nova senha"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirmar Nova Senha</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirme a nova senha"
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  disabled={pwdLoading}
+                  onClick={async () => {
+                    if (!newPassword || newPassword !== confirmPassword) {
+                      toast({ title: "Erro", description: "As senhas devem coincidir", variant: "destructive" });
+                      return;
+                    }
+                    setPwdLoading(true);
+                    try {
+                      const user = await getAuthenticatedUser();
+                      if (!user || !user.email) throw new Error("Sessão inválida");
+                      if (!currentPassword) throw new Error("Informe a senha atual");
+                      const { error: reauthError } = await supabase.auth.signInWithPassword({
+                        email: user.email,
+                        password: currentPassword,
+                      });
+                      if (reauthError) throw new Error("Senha atual incorreta");
+                      const { error } = await supabase.auth.updateUser({ password: newPassword });
+                      if (error) throw error;
+                      setCurrentPassword("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                      toast({ title: "Senha atualizada", description: "Sua senha foi alterada com sucesso." });
+                    } catch (err) {
+                      const message = err instanceof Error ? err.message : "Falha ao atualizar senha";
+                      toast({ title: "Erro", description: message, variant: "destructive" });
+                    } finally {
+                      setPwdLoading(false);
+                    }
+                  }}
+                >
+                  {pwdLoading ? "Salvando..." : "Atualizar Senha"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -1,1 +1,16 @@
-project_id = "begbssdvrrwxgbegugbt"
+project_id = "lhtdqduyiafuvznlffyq"
+
+[functions.admin-list-users]
+verify_jwt = false
+
+[functions.admin-create-user]
+verify_jwt = false
+
+[functions.admin-delete-user]
+verify_jwt = false
+
+[functions.send-schedule-email]
+verify_jwt = true
+
+[functions.schedule-email-track]
+verify_jwt = false

@@ -81,6 +81,14 @@ const sanitizePathSegment = (value: string) => {
   return base.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
 };
 
+const sanitizeFileBaseName = (value: string) => {
+  const normalized = String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return sanitizePathSegment(normalized);
+};
+
 const formatFileSize = (bytes: number) => {
   if (!bytes) return "0 Bytes";
   const k = 1024;
@@ -203,6 +211,9 @@ export default function MaterialConsulta() {
   const [loading, setLoading] = useState(true);
   const [docs, setDocs] = useState<MaterialDoc[]>([]);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editingDocName, setEditingDocName] = useState("");
+  const [renamingDocId, setRenamingDocId] = useState<string | null>(null);
 
   const [bulletinLoading, setBulletinLoading] = useState(true);
   const [bulletins, setBulletins] = useState<TechnicalBulletin[]>([]);
@@ -747,6 +758,87 @@ export default function MaterialConsulta() {
       toast({ title: "Erro", description: message, variant: "destructive" });
     } finally {
       setDeletingPath(null);
+    }
+  };
+
+  const startRenameDoc = (doc: MaterialDoc) => {
+    setEditingDocId(doc.id);
+    setEditingDocName(doc.displayName);
+  };
+
+  const cancelRenameDoc = () => {
+    setEditingDocId(null);
+    setEditingDocName("");
+  };
+
+  const saveRenameDoc = async (doc: MaterialDoc) => {
+    const display = String(editingDocName || "").trim();
+    if (!display) {
+      toast({ title: "Campo obrigatório", description: "Preencha o nome do arquivo.", variant: "destructive" });
+      return;
+    }
+
+    if (display === doc.displayName) {
+      cancelRenameDoc();
+      return;
+    }
+
+    setRenamingDocId(doc.id);
+    try {
+      const ext = (() => {
+        const idx = doc.fileName.lastIndexOf(".");
+        return idx >= 0 ? doc.fileName.slice(idx) : "";
+      })();
+      const prefix = (() => {
+        const m = /^\d+_/.exec(doc.fileName);
+        return m ? m[0] : "";
+      })();
+
+      const base = sanitizeFileBaseName(display) || "Arquivo";
+      const dir = doc.filePath.slice(0, doc.filePath.lastIndexOf("/"));
+
+      let movedName = "";
+      let movedPath = "";
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const suffix = attempt === 0 ? "" : `_${attempt + 1}`;
+        const nextName = `${prefix}${base}${suffix}${ext}`;
+        const nextPath = `${dir}/${nextName}`;
+        const { error } = await supabase.storage.from("process-documents").move(doc.filePath, nextPath);
+        if (!error) {
+          movedName = nextName;
+          movedPath = nextPath;
+          break;
+        }
+
+        const status = Number((error as any)?.statusCode || (error as any)?.status || 0);
+        const msg = String((error as any)?.message || "").toLowerCase();
+        const conflict = status === 409 || msg.includes("exist") || msg.includes("already");
+        if (!conflict) throw error;
+      }
+
+      if (!movedPath) throw new Error("Não foi possível renomear: destino já existe.");
+
+      setDocs((prev) =>
+        prev.map((d) =>
+          d.id === doc.id
+            ? {
+                ...d,
+                id: movedPath,
+                fileName: movedName,
+                filePath: movedPath,
+                displayName: extractDisplayName(movedName),
+              }
+            : d,
+        ),
+      );
+      cancelRenameDoc();
+      toast({ title: "Renomeado", description: "Nome do arquivo atualizado." });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao renomear";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    } finally {
+      setRenamingDocId(null);
     }
   };
 
@@ -1365,6 +1457,17 @@ export default function MaterialConsulta() {
                     />
                   </div>
 
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="fispq-protection">Medida de proteção requerida</Label>
+                    <Textarea
+                      id="fispq-protection"
+                      value={fispqDraft.protection_measures_required}
+                      onChange={(e) => setFispqDraft((p) => ({ ...p, protection_measures_required: e.target.value }))}
+                      className="min-h-[110px]"
+                      placeholder="Ex.: EPI/EPC, proteção respiratória, luvas, óculos, ventilação local, etc."
+                    />
+                  </div>
+
                   <div className="space-y-2">
                     <Label>Documento (compacto)</Label>
                     <div className="flex flex-wrap items-center gap-2">
@@ -1425,6 +1528,9 @@ export default function MaterialConsulta() {
                           ? next.skin_absorption_risk
                           : parsed.skin_absorption_risk || next.skin_absorption_risk,
                         flash_point: next.flash_point.trim() ? next.flash_point : parsed.flash_point || next.flash_point,
+                        protection_measures_required: next.protection_measures_required.trim()
+                          ? next.protection_measures_required
+                          : parsed.protection_measures_required || next.protection_measures_required,
                       };
                     });
                   }}
@@ -1486,7 +1592,29 @@ export default function MaterialConsulta() {
                             className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/30"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="font-medium truncate">{doc.displayName}</div>
+                              {editingDocId === doc.id ? (
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    value={editingDocName}
+                                    onChange={(e) => setEditingDocName(e.target.value)}
+                                    placeholder="Nome do arquivo"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={renamingDocId === doc.id}
+                                    onClick={() => saveRenameDoc(doc)}
+                                    title="Salvar"
+                                  >
+                                    {renamingDocId === doc.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                  </Button>
+                                  <Button variant="ghost" size="sm" disabled={renamingDocId === doc.id} onClick={cancelRenameDoc} title="Cancelar">
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="font-medium truncate">{doc.displayName}</div>
+                              )}
                               <div className="text-sm text-muted-foreground flex flex-wrap gap-x-2">
                                 <span>{formatFileSize(doc.fileSize)}</span>
                                 <span>•</span>
@@ -1495,6 +1623,15 @@ export default function MaterialConsulta() {
                             </div>
 
                             <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={editingDocId === doc.id || renamingDocId === doc.id}
+                                onClick={() => startRenameDoc(doc)}
+                                title="Renomear"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
                               <Button variant="ghost" size="sm" onClick={() => previewDoc(doc)} title="Visualizar">
                                 <Eye className="w-4 h-4" />
                               </Button>

@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 interface IdentificationData {
   processNumber?: string;
@@ -12,9 +13,10 @@ interface IdentificationData {
 interface IdentificationsSectionProps {
   value: IdentificationData;
   onChange: (value: IdentificationData) => void;
+  courtOptions?: string[];
 }
 
-export default function IdentificationsSection({ value, onChange }: IdentificationsSectionProps) {
+export default function IdentificationsSection({ value, onChange, courtOptions }: IdentificationsSectionProps) {
   const updateField = (field: keyof IdentificationData, fieldValue: string) => {
     onChange({ ...value, [field]: fieldValue });
   };
@@ -56,14 +58,32 @@ export default function IdentificationsSection({ value, onChange }: Identificati
           />
         </div>
         <div>
-          <Label htmlFor="court">Vara do Trabalho</Label>
-          <Input
-            id="court"
-            value={value.court || ''}
-            onChange={(e) => updateField('court', e.target.value)}
-            placeholder="Ex: 01ª Vara do Trabalho de Diadema"
-            className="mt-2"
-          />
+          <Label htmlFor="court">Vara / Tribunal</Label>
+          {Array.isArray(courtOptions) && courtOptions.length > 0 ? (
+            <Select
+              value={value.court || undefined}
+              onValueChange={(v) => updateField('court', v)}
+            >
+              <SelectTrigger id="court">
+                <SelectValue placeholder="Selecione a vara/tribunal" />
+              </SelectTrigger>
+              <SelectContent>
+                {courtOptions.map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              id="court"
+              value={value.court || ''}
+              onChange={(e) => updateField('court', e.target.value)}
+              placeholder="Ex: 01ª Vara do Trabalho de Diadema"
+              className="mt-2"
+            />
+          )}
         </div>
       </CardContent>
     </Card>

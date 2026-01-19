@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface Position {
   title: string;
@@ -18,9 +19,10 @@ interface ClaimantData {
 interface ClaimantDataSectionProps {
   value: ClaimantData;
   onChange: (value: ClaimantData) => void;
+  syncedFromProcess?: boolean;
 }
 
-export default function ClaimantDataSection({ value, onChange }: ClaimantDataSectionProps) {
+export default function ClaimantDataSection({ value, onChange, syncedFromProcess }: ClaimantDataSectionProps) {
   const positions = value.positions || [];
 
   const addPosition = () => {
@@ -46,11 +48,16 @@ export default function ClaimantDataSection({ value, onChange }: ClaimantDataSec
   return (
     <Card className="shadow-card">
       <CardHeader>
-        <CardTitle>2. Dados da Reclamante</CardTitle>
+        <CardTitle>2. Dados da(o) Reclamante</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
-          <Label htmlFor="claimantFullName">Nome Completo</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="claimantFullName">Nome Completo</Label>
+            {syncedFromProcess && (
+              <Badge variant="secondary" className="text-[10px]">Sincronizado do processo</Badge>
+            )}
+          </div>
           <Input
             id="claimantFullName"
             value={value.name || ''}

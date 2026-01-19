@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,8 @@ import { Plus, Trash2 } from "lucide-react";
 interface CollectiveProtectionSectionProps {
   value: string;
   onChange: (value: string) => void;
+  epcsValue?: string;
+  onEpcsChange?: (value: string) => void;
 }
 
 const defaultOptions = [
@@ -19,7 +21,7 @@ const defaultOptions = [
   "Sinalização",
 ];
 
-export default function CollectiveProtectionSection({ value, onChange }: CollectiveProtectionSectionProps) {
+export default function CollectiveProtectionSection({ value, onChange, epcsValue = "", onEpcsChange }: CollectiveProtectionSectionProps) {
   const [selected, setSelected] = useState<string[]>([]);
   const [others, setOthers] = useState<string[]>([]);
   const [newOther, setNewOther] = useState<string>("");
@@ -45,6 +47,45 @@ export default function CollectiveProtectionSection({ value, onChange }: Collect
     const block = `\n\nEPCs selecionados:\n${selected.map((s) => `- ${s}`).join("\n")}`;
     onChange(`${value}${block}`);
   };
+
+  // Sincroniza seleção com o campo epcs (string com bullets)
+  useEffect(() => {
+    if (!onEpcsChange) return;
+    const epcsText = selected.length ? `EPCs selecionados:\n${selected.map((s) => `- ${s}`).join("\n")}` : epcsValue || "";
+    onEpcsChange(epcsText);
+
+    // Mantém a descrição em sincronia: insere/substitui o bloco "EPCs selecionados:" automaticamente
+    try {
+      const current = String(value || "");
+      const cleaned = current.replace(/\n?\n?EPCs selecionados:[\s\S]*$/i, "").trim();
+      const nextDesc = selected.length ? `${cleaned}\n\n${epcsText}` : cleaned;
+      if (nextDesc !== current) {
+        onChange(nextDesc);
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  // Hidrata seleção ao carregar baseado no laudo (epcsValue ou descrição)
+  useEffect(() => {
+    const source = (epcsValue || value || "").trim();
+    if (!source) return;
+    const lines = source.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const items: string[] = [];
+    let inSelected = false;
+    lines.forEach((l) => {
+      if (/EPCs selecionados:/i.test(l)) { inSelected = true; return; }
+      const m = l.match(/^[-•]\s*(.+)$/);
+      if ((inSelected && m) || m) items.push(m[1].trim());
+    });
+    if (items.length) {
+      setSelected(items);
+      const extras = items.filter((i) => !defaultOptions.includes(i));
+      if (extras.length) setOthers((prev) => Array.from(new Set([...prev, ...extras])));
+    }
+    // Apenas ao montar ou quando epcsValue muda
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epcsValue]);
 
   return (
     <Card className="shadow-card">

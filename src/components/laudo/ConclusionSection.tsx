@@ -19,7 +19,8 @@ export default function ConclusionSection({ value, onChange }: ConclusionSection
 
   const generateConclusion = () => {
     const header =
-      "Considerando a visita pericial realizada, as informações obtidas, os fatos observados e as análises efetuadas, conclui-se:";
+      "Considerando a visita pericial realizada, as informações obtidas, os\n" +
+      "fatos observados e as análises efetuadas, conclui-se, que as atividades desempenhadas pelo(a) reclamante, foram:";
 
     let insalText = "";
     const periodText = period.trim() ? ` por ${period.trim()}` : "";

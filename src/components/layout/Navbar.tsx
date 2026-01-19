@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Scale, LogOut, User } from "lucide-react";
+import { Scale, LogOut, User, Users, Lock, Menu, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
@@ -13,18 +13,39 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
+import NotificationCenter from "@/components/notifications/NotificationCenter";
+import NotificationToast from "@/components/notifications/NotificationToast";
+import { isAdmin } from "@/utils/adminUtils";
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 export default function Navbar() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [userEmail, setUserEmail] = useState<string>("");
+  const [adminEnabled, setAdminEnabled] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user?.email) {
-        setUserEmail(session.user.email);
+    const load = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          setUserEmail(session.user.email);
+        }
+
+        const { data, error } = await supabase.rpc("is_admin");
+        if (error) {
+          setAdminEnabled(false);
+          return;
+        }
+        setAdminEnabled(Boolean(data));
+      } catch {
+        setAdminEnabled(false);
       }
-    });
+    };
+
+    load();
   }, []);
 
   const handleLogout = async () => {
@@ -38,6 +59,7 @@ export default function Navbar() {
 
   return (
     <nav className="bg-white border-b border-border sticky top-0 z-50 shadow-sm">
+      <NotificationToast />
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           <Link to="/dashboard" className="flex items-center space-x-3 group">
@@ -47,22 +69,76 @@ export default function Navbar() {
             <span className="text-xl font-bold text-foreground">SPD</span>
           </Link>
 
-          <div className="flex items-center space-x-6">
-            <Link to="/dashboard">
-              <Button variant="ghost">Dashboard</Button>
-            </Link>
-            <Link to="/agendamento">
-              <Button variant="ghost">Agendamento</Button>
-            </Link>
-            <Link to="/processos">
-              <Button variant="ghost">Processos</Button>
-            </Link>
-            <Link to="/pagamento">
-              <Button variant="ghost">Pagamento</Button>
-            </Link>
-            <Link to="/novo-processo">
-              <Button variant="default">Novo Processo</Button>
-            </Link>
+          <div className="flex items-center gap-2">
+            <div className="hidden lg:flex items-center gap-1">
+              <Link to="/dashboard">
+                <Button variant="ghost">Dashboard</Button>
+              </Link>
+              <Link to="/agendamento">
+                <Button variant="ghost">Agendamento</Button>
+              </Link>
+              <Link to="/processos">
+                <Button variant="ghost">Processos</Button>
+              </Link>
+              <Link to="/configuracao-relatorio">
+                <Button variant="ghost">Configuração do Relatório</Button>
+              </Link>
+              <Link to="/material-consulta">
+                <Button variant="ghost">Material de Consulta</Button>
+              </Link>
+              <Link to="/usuarios-vinculados">
+                <Button variant="ghost">Usuários Vinculados</Button>
+              </Link>
+              {(adminEnabled || isAdmin(userEmail)) && (
+                <Link to="/pagamento">
+                  <Button variant="ghost">Pagamento</Button>
+                </Link>
+              )}
+              {(adminEnabled || isAdmin(userEmail)) && (
+                <Link to="/admin/usuarios">
+                  <Button variant="ghost">Admin</Button>
+                </Link>
+              )}
+              <Link to="/novo-processo">
+                <Button variant="default">Novo Processo</Button>
+              </Link>
+            </div>
+
+            <div className="lg:hidden">
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="Abrir menu">
+                    <Menu className="w-5 h-5" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-80">
+                  <SheetTitle className="sr-only">Menu</SheetTitle>
+                  <SheetDescription className="sr-only">
+                    Navegue para as seções do sistema.
+                  </SheetDescription>
+                  <div className="flex flex-col gap-2 mt-8">
+                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/dashboard")}>Dashboard</Button>
+                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/agendamento")}>Agendamento</Button>
+                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/processos")}>Processos</Button>
+                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/configuracao-relatorio")}>Configuração do Relatório</Button>
+                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/material-consulta")}>Material de Consulta</Button>
+                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/usuarios-vinculados")}>Usuários Vinculados</Button>
+                    {(adminEnabled || isAdmin(userEmail)) && (
+                      <Button variant="ghost" className="justify-start" onClick={() => navigate("/pagamento")}>Pagamento</Button>
+                    )}
+                    {(adminEnabled || isAdmin(userEmail)) && (
+                      <Button variant="ghost" className="justify-start" onClick={() => navigate("/admin/usuarios")}>
+                        <Shield className="mr-2 h-4 w-4" />
+                        Admin
+                      </Button>
+                    )}
+                    <Button variant="default" className="justify-start" onClick={() => navigate("/novo-processo")}>Novo Processo</Button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            <NotificationCenter />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -85,6 +161,10 @@ export default function Navbar() {
                 <DropdownMenuItem onClick={() => navigate("/perfil")}>
                   <User className="mr-2 h-4 w-4" />
                   Perfil
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/perfil#alterar-senha")}>
+                  <Lock className="mr-2 h-4 w-4" />
+                  Alterar Senha
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />

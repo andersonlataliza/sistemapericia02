@@ -3,13 +3,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 interface MethodologySectionProps {
   value: string;
   onChange: (value: string) => void;
+  templates?: { id: string; name: string; text: string }[];
+  onApplyTemplate?: (t: { id: string; name: string; text: string }) => void;
+  onCreateTemplate?: () => void;
+  onManageTemplates?: () => void;
 }
 
-export default function MethodologySection({ value, onChange }: MethodologySectionProps) {
+export default function MethodologySection({ value, onChange, templates, onApplyTemplate, onCreateTemplate, onManageTemplates }: MethodologySectionProps) {
   const inferType = (v: string): "nr15" | "nr16" | "both" => {
     const lower = (v || "").toLowerCase();
     const has15 = lower.includes("nr-15") || lower.includes("nr15");
@@ -19,6 +24,9 @@ export default function MethodologySection({ value, onChange }: MethodologySecti
     return "nr15";
   };
   const [nrType, setNrType] = useState<"nr15" | "nr16" | "both">(inferType(value || ""));
+  const [tplId, setTplId] = useState<string>("");
+  const list = Array.isArray(templates) ? templates : [];
+  const selectedTpl = list.find((t) => t.id === tplId) || null;
 
   const generateText = (t: "nr15" | "nr16" | "both") => {
     const nrLabel = t === "nr15" ? "NR-15" : t === "nr16" ? "NR-16" : "NR-15 e NR-16";
@@ -37,9 +45,45 @@ export default function MethodologySection({ value, onChange }: MethodologySecti
   return (
     <Card className="shadow-card">
       <CardHeader>
-        <CardTitle>9. Metodologia de Avaliação</CardTitle>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <CardTitle>9. Metodologia de Avaliação</CardTitle>
+          {(!!onManageTemplates || !!onCreateTemplate) && (
+            <div className="flex items-center gap-2">
+              {!!onManageTemplates && (
+                <Button type="button" size="sm" variant="outline" onClick={onManageTemplates}>Editar Templates</Button>
+              )}
+              {!!onCreateTemplate && (
+                <Button type="button" size="sm" onClick={onCreateTemplate}>Novo Template</Button>
+              )}
+            </div>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {list.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={tplId} onValueChange={(v) => setTplId(v)}>
+              <SelectTrigger className="w-56 h-9">
+                <SelectValue placeholder="Selecionar template" />
+              </SelectTrigger>
+              <SelectContent>
+                {list.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!selectedTpl}
+              onClick={() => {
+                if (!selectedTpl) return;
+                onApplyTemplate?.(selectedTpl);
+              }}
+            >Aplicar Template</Button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <Label className="text-xs">Tipo de NR</Label>

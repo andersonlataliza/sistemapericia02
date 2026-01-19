@@ -18,13 +18,42 @@ interface DiligenceData {
 interface DiligencesSectionProps {
   value: DiligenceData[];
   onChange: (value: DiligenceData[]) => void;
+  processData?: {
+    inspection_address?: string | null;
+    inspection_city?: string | null;
+    inspection_date?: string | null;
+    inspection_time?: string | null;
+  };
 }
 
-export default function DiligencesSection({ value, onChange }: DiligencesSectionProps) {
+export default function DiligencesSection({ value, onChange, processData }: DiligencesSectionProps) {
   const addDiligence = () => {
+    // Construir o local automaticamente a partir dos dados do processo
+    let autoLocation = "";
+    if (processData?.inspection_address && processData?.inspection_city) {
+      autoLocation = `${processData.inspection_address}, ${processData.inspection_city}`;
+    } else if (processData?.inspection_address) {
+      autoLocation = processData.inspection_address;
+    } else if (processData?.inspection_city) {
+      autoLocation = processData.inspection_city;
+    }
+
+    // Usar a data da perícia se disponível
+    const autoDate = processData?.inspection_date ? new Date(processData.inspection_date).toISOString().slice(0, 10) : "";
+    
+    // Usar o horário da perícia se disponível
+    const autoTime = processData?.inspection_time || "";
+
     onChange([
       ...value,
-      { location: "", date: "", time: "", description: "", useProof: false, proofImage: "" },
+      { 
+        location: autoLocation, 
+        date: autoDate, 
+        time: autoTime, 
+        description: "", 
+        useProof: false, 
+        proofImage: "" 
+      },
     ]);
   };
 

@@ -24,7 +24,11 @@ export default function DefendantDataSection({ value, onChange }: DefendantDataS
   };
 
   useEffect(() => {
-    onChange(buildText(branch, risk));
+    // Evita sobrescrever o valor existente ao montar a página.
+    // Só atualiza o texto gerado quando pelo menos um dos campos foi preenchido.
+    if (branch !== "" || risk !== "") {
+      onChange(buildText(branch, risk));
+    }
   }, [branch, risk]);
 
   return (

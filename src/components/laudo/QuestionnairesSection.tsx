@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -19,9 +20,11 @@ interface Questionnaire {
 
 interface QuestionnairesSectionProps {
   processId: string;
+  reportConfig?: any;
+  onReportConfigChange?: (next: any) => void;
 }
 
-export default function QuestionnairesSection({ processId }: QuestionnairesSectionProps) {
+export default function QuestionnairesSection({ processId, reportConfig, onReportConfigChange }: QuestionnairesSectionProps) {
   const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>([]);
   const [loading, setLoading] = useState(true);
   const [bulkInput, setBulkInput] = useState<Record<string, string>>({
@@ -29,7 +32,20 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
     judge: "",
     defendant: "",
   });
+  const [extractedBox, setExtractedBox] = useState<Record<string, string>>({
+    claimant: "",
+    judge: "",
+    defendant: "",
+  });
   const { toast } = useToast();
+
+  const parseRc = (rc: any) => {
+    try {
+      return typeof rc === "string" ? JSON.parse(rc || "{}") : (rc || {});
+    } catch {
+      return {};
+    }
+  };
 
   useEffect(() => {
     fetchQuestionnaires();
@@ -46,6 +62,23 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
 
       if (error) throw error;
       setQuestionnaires(data || []);
+
+      let rc: any = parseRc(reportConfig);
+      if (!reportConfig) {
+        const { data: proc, error: procErr } = await supabase
+          .from("processes")
+          .select("report_config")
+          .eq("id", processId)
+          .single();
+        if (procErr) throw procErr;
+        rc = parseRc((proc as any)?.report_config);
+      }
+      const q = (rc as any)?.questionnaires || {};
+      setExtractedBox({
+        claimant: String(q?.claimantText || ""),
+        defendant: String(q?.defendantText || ""),
+        judge: String(q?.judgeText || ""),
+      });
     } catch (error: any) {
       toast({
         title: "Erro ao carregar quesitos",
@@ -112,17 +145,18 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
 
   const saveQuestionnaires = async () => {
     try {
-      const promises = questionnaires.map((q) => {
-        if (q.id) {
-          return supabase
-            .from("questionnaires")
-            .update({
-              question: q.question,
-              answer: q.answer,
-              question_number: q.question_number,
-            })
-            .eq("id", q.id);
-        } else {
+      const results = await Promise.all(
+        questionnaires.map((q) => {
+          if (q.id) {
+            return supabase
+              .from("questionnaires")
+              .update({
+                question: q.question,
+                answer: q.answer,
+                question_number: q.question_number,
+              })
+              .eq("id", q.id);
+          }
           return supabase
             .from("questionnaires")
             .insert({
@@ -132,10 +166,11 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
               question: q.question,
               answer: q.answer,
             });
-        }
-      });
+        })
+      );
 
-      await Promise.all(promises);
+      const firstErr = results.find((r: any) => r?.error)?.error;
+      if (firstErr) throw firstErr;
       
       toast({
         title: "Quesitos salvos",
@@ -176,6 +211,61 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
     return items;
   };
 
+  const persistQuestionnairesText = async (party: string, text: string) => {
+    let rc: any = parseRc(reportConfig);
+    if (!reportConfig) {
+      const { data, error } = await supabase
+        .from("processes")
+        .select("report_config")
+        .eq("id", processId)
+        .single();
+      if (error) throw error;
+      rc = parseRc((data as any)?.report_config);
+    }
+    const nextRc = { ...rc, questionnaires: { ...(rc?.questionnaires || {}), [`${party}Text`]: text } };
+    const { error: upErr } = await supabase.from("processes").update({ report_config: nextRc }).eq("id", processId);
+    if (upErr) throw upErr;
+    onReportConfigChange?.(nextRc);
+  };
+
+  const upsertExtractedItems = async (party: string, items: { number: number; text: string }[]) => {
+    const { data: existing, error: fetchErr } = await supabase
+      .from("questionnaires")
+      .select("id, question_number, answer")
+      .eq("process_id", processId)
+      .eq("party", party);
+    if (fetchErr) throw fetchErr;
+    const map = new Map<number, { id: string; answer: string }>(
+      (existing || []).map((r: any) => [Number(r.question_number), { id: String(r.id), answer: String(r.answer || "") }])
+    );
+    const inserts: any[] = [];
+    const updates: { id: string; question_number: number; question: string; answer: string }[] = [];
+    items.forEach((it) => {
+      const existingRow = map.get(it.number);
+      if (existingRow?.id) {
+        updates.push({ id: existingRow.id, question_number: it.number, question: it.text, answer: existingRow.answer });
+      } else {
+        inserts.push({ process_id: processId, party, question_number: it.number, question: it.text, answer: "" });
+      }
+    });
+    if (inserts.length) {
+      const { error } = await supabase.from("questionnaires").insert(inserts);
+      if (error) throw error;
+    }
+    if (updates.length) {
+      const results = await Promise.all(
+        updates.map((u) =>
+          supabase
+            .from("questionnaires")
+            .update({ question: u.question, answer: u.answer, question_number: u.question_number })
+            .eq("id", u.id)
+        )
+      );
+      const anyErr = results.find((r: any) => r.error);
+      if (anyErr) throw anyErr.error;
+    }
+  };
+
   const addExtractedToParty = (party: string, items: { number: number; text: string }[]) => {
     setQuestionnaires((curr) => {
       let lastNumber = curr
@@ -195,12 +285,13 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
     });
   };
 
-  const handleBulkPaste = (party: string) => {
-    const pasted = bulkInput[party] || "";
-    if (!pasted.trim()) {
-      toast({ title: "Nada para extrair", description: "Cole o texto com a numeração dos quesitos." });
-      return;
-    }
+  const saveBulkTextAsExtracted = async (
+    party: string,
+    rawText: string,
+    options?: { clearBulk?: boolean }
+  ) => {
+    const pasted = rawText || "";
+    if (!pasted.trim()) return;
     const items = extractQuestionsFromText(pasted);
     if (items.length === 0) {
       toast({
@@ -209,9 +300,28 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
       });
       return;
     }
-    addExtractedToParty(party, items);
-    toast({ title: "Quesitos extraídos", description: `Adicionados ${items.length} quesitos.` });
-    setBulkInput((prev) => ({ ...prev, [party]: "" }));
+    const consolidated = items.map((it, idx) => `${idx + 1}) ${it.text}`).join("\n");
+    setExtractedBox((prev) => ({ ...prev, [party]: consolidated }));
+    try {
+      await persistQuestionnairesText(party, consolidated);
+      await upsertExtractedItems(party, items);
+      toast({ title: "Quesitos extraídos", description: "Conteúdo salvo e caixa única atualizada." });
+      await fetchQuestionnaires();
+    } catch (error: any) {
+      toast({ title: "Erro ao salvar quesitos extraídos", description: error?.message ?? "Falha ao salvar.", variant: "destructive" });
+    }
+    if (options?.clearBulk) {
+      setBulkInput((prev) => ({ ...prev, [party]: "" }));
+    }
+  };
+
+  const handleBulkPaste = async (party: string) => {
+    const pasted = bulkInput[party] || "";
+    if (!pasted.trim()) {
+      toast({ title: "Nada para extrair", description: "Cole o texto com a numeração dos quesitos." });
+      return;
+    }
+    await saveBulkTextAsExtracted(party, pasted, { clearBulk: true });
   };
 
   const handleFileInput = async (party: string, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -223,6 +333,7 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
       const isDocx =
         file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         file.name.toLowerCase().endsWith(".docx");
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 
       if (isTxt) {
         text = await file.text();
@@ -241,8 +352,33 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
           e.target.value = "";
           return;
         }
+      } else if (isPdf) {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
+          pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl as any;
+          const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+          const pdf = await loadingTask.promise;
+          let fullText = "";
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const pageText = (content.items || []).map((it: any) => it.str || "").join(" ");
+            fullText += pageText + "\n\n";
+          }
+          text = fullText.trim();
+          if (!text) throw new Error("PDF sem texto visível");
+        } catch (err: any) {
+          toast({
+            title: "Falha ao extrair PDF",
+            description: "Se o PDF for imagem, cole o texto manualmente ou use TXT/DOCX.",
+            variant: "destructive",
+          });
+          e.target.value = "";
+          return;
+        }
       } else {
-        toast({ title: "Formato não suportado", description: "Use DOCX ou TXT.", variant: "destructive" });
+        toast({ title: "Formato não suportado", description: "Use PDF, DOCX ou TXT.", variant: "destructive" });
         e.target.value = "";
         return;
       }
@@ -257,8 +393,16 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
         return;
       }
 
-      addExtractedToParty(party, items);
-      toast({ title: "Quesitos extraídos", description: `Adicionados ${items.length} quesitos.` });
+      const consolidated = items.map((it, idx) => `${idx + 1}) ${it.text}`).join("\n");
+      setExtractedBox((prev) => ({ ...prev, [party]: consolidated }));
+      try {
+        await persistQuestionnairesText(party, consolidated);
+        await upsertExtractedItems(party, items);
+        toast({ title: "Quesitos extraídos", description: "Conteúdo salvo e caixa única atualizada." });
+        await fetchQuestionnaires();
+      } catch (error: any) {
+        toast({ title: "Erro ao salvar quesitos extraídos", description: error?.message ?? "Falha ao salvar.", variant: "destructive" });
+      }
     } finally {
       // não salvar arquivo; limpar input
       e.target.value = "";
@@ -266,10 +410,6 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
   };
 
   const renderPartyQuestions = (party: string, partyLabel: string) => {
-    const partyQuestions = getQuestionsByParty(party);
-    const startIndex = questionnaires.findIndex(q => q.party === party && 
-      q.question_number === (partyQuestions[0]?.question_number || 1));
-
     return (
       <div className="space-y-4">
         <div className="rounded-lg border p-4 space-y-3 bg-muted/30">
@@ -278,6 +418,14 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
             <Textarea
               value={bulkInput[party] || ""}
               onChange={(e) => setBulkInput((prev) => ({ ...prev, [party]: e.target.value }))}
+              onPaste={(e) => {
+                const el = e.target as HTMLTextAreaElement;
+                window.setTimeout(() => {
+                  const nextVal = el?.value || "";
+                  if (!String(nextVal).trim()) return;
+                  void saveBulkTextAsExtracted(party, nextVal, { clearBulk: false });
+                }, 0);
+              }}
               placeholder={"Ex.:\n1) Pergunta do quesito...\n2. Outro quesito...\n3 - Mais um..."}
               className="min-h-[80px]"
             />
@@ -287,7 +435,7 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
             <div className="flex items-center gap-2">
               <Input
                 type="file"
-                accept=".docx,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                accept=".docx,.txt,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/pdf"
                 onChange={(e) => handleFileInput(party, e)}
                 className="max-w-xs"
               />
@@ -297,66 +445,23 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
             </div>
           </div>
         </div>
-        <div className="flex justify-end">
-          <Button onClick={() => addQuestion(party)} size="sm" variant="outline">
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar Quesito
-          </Button>
+        <div className="space-y-2">
+          <Label className="text-xs">Quesitos extraídos (caixa única)</Label>
+          <Textarea
+            value={extractedBox[party] || ""}
+            onChange={async (e) => {
+              const v = e.target.value;
+              setExtractedBox((prev) => ({ ...prev, [party]: v }));
+              try {
+                await persistQuestionnairesText(party, v);
+              } catch (error: any) {
+                toast({ title: "Erro ao salvar caixa única", description: error?.message ?? "Falha ao salvar.", variant: "destructive" });
+              }
+            }}
+            placeholder={`Quesitos da ${partyLabel} em caixa única...`}
+            className="min-h-[160px]"
+          />
         </div>
-
-        {partyQuestions.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
-            Nenhum quesito adicionado para {partyLabel}.
-          </p>
-        ) : (
-          <div className="space-y-4">
-            {partyQuestions.map((q, idx) => {
-              const globalIndex = questionnaires.indexOf(q);
-              
-              return (
-                <div key={globalIndex} className="border rounded-lg p-4 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <Label className="text-xs">Número do Quesito</Label>
-                      <Input
-                        type="number"
-                        value={q.question_number}
-                        onChange={(e) => updateQuestion(globalIndex, 'question_number', parseInt(e.target.value))}
-                        className="mt-1 w-24"
-                      />
-                    </div>
-                    <Button
-                      onClick={() => removeQuestion(q.id, globalIndex)}
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0"
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Pergunta</Label>
-                    <Textarea
-                      value={q.question}
-                      onChange={(e) => updateQuestion(globalIndex, 'question', e.target.value)}
-                      placeholder="Digite a pergunta do quesito..."
-                      className="mt-1 min-h-[80px]"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Resposta</Label>
-                    <Textarea
-                      value={q.answer}
-                      onChange={(e) => updateQuestion(globalIndex, 'answer', e.target.value)}
-                      placeholder="Digite a resposta do quesito..."
-                      className="mt-1 min-h-[100px]"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     );
   };
@@ -378,7 +483,28 @@ export default function QuestionnairesSection({ processId }: QuestionnairesSecti
     <Card className="shadow-card">
       <CardHeader className="space-y-2">
         <CardTitle>20. Quesitos da Perícia</CardTitle>
-        <Button onClick={saveQuestionnaires} className="w-full">
+        <Button
+          onClick={async () => {
+            try {
+              const pending = ["claimant", "defendant", "judge"].filter((p) => String(bulkInput[p] || "").trim().length > 0);
+              for (const p of pending) {
+                await saveBulkTextAsExtracted(p, bulkInput[p] || "", { clearBulk: true });
+              }
+
+              const parties = ["claimant", "defendant", "judge"] as const;
+              for (const party of parties) {
+                const text = String(extractedBox[party] || "");
+                if (!text.trim()) continue;
+                const items = extractQuestionsFromText(text);
+                await persistQuestionnairesText(party, text);
+                await upsertExtractedItems(party, items);
+              }
+            } catch {
+            }
+            await saveQuestionnaires();
+          }}
+          className="w-full"
+        >
           Salvar Quesitos
         </Button>
       </CardHeader>
