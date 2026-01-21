@@ -35,6 +35,15 @@ const App = () => {
 
   const isBlockedEffective = isBlocked && !isAdminUser;
 
+  const loginRedirect = () => {
+    try {
+      const to = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      return `/?redirect=${encodeURIComponent(to)}`;
+    } catch {
+      return "/";
+    }
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -110,39 +119,39 @@ const App = () => {
               <Route path="/bloqueado" element={session ? <Blocked /> : <Navigate to="/" />} />
               <Route
                 path="/dashboard"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Dashboard />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Dashboard />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/agendamento"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Scheduling />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Scheduling />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/processos"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Processes />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Processes />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/pagamento"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Payment />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Payment />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/admin/usuarios"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <AdminUsers />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <AdminUsers />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/novo-processo"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <NewProcess />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <NewProcess />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/processo/:id"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <ProcessDetail />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <ProcessDetail />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/perfil"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Profile />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <Profile />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/usuarios-vinculados"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <LinkedUsers />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <LinkedUsers />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/reset-password"
@@ -150,15 +159,15 @@ const App = () => {
               />
               <Route
                 path="/teste-pdf"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <TesteImagemPDF />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <TesteImagemPDF />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/configuracao-relatorio"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <ReportConfigPage />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <ReportConfigPage />) : <Navigate to={loginRedirect()} />}
               />
               <Route
                 path="/material-consulta"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <MaterialConsulta />) : <Navigate to="/" />}
+                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <MaterialConsulta />) : <Navigate to={loginRedirect()} />}
               />
               <Route path="*" element={<NotFound />} />
             </Routes>

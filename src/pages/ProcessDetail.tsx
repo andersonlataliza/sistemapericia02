@@ -207,6 +207,7 @@ export default function ProcessDetail() {
   const [scheduleEmailSubject, setScheduleEmailSubject] = useState<string>("");
   const [scheduleEmailBody, setScheduleEmailBody] = useState<string>("");
   const [scheduleEmailReceipts, setScheduleEmailReceipts] = useState<any[]>([]);
+
   const handleSaveTemplatesOnly = async (nextTemplates?: any[]) => {
     try {
       const session = await validateAndRecoverSession();
@@ -440,6 +441,7 @@ export default function ProcessDetail() {
       toast({ title: "Falha ao copiar", description: "Copie manualmente o texto da mensagem.", variant: "destructive" });
     }
   };
+
 
   const refreshScheduleEmailReceipts = useCallback(async (processId?: string) => {
     const pid = String(processId || process?.id || "").trim();
@@ -1739,6 +1741,17 @@ export default function ProcessDetail() {
     return null;
   }
 
+  const defaultTab = (() => {
+    try {
+      const raw = new URLSearchParams(window.location.search).get("tab");
+      const v = String(raw || "").trim();
+      const allowed = new Set(["processo", "agendamento", "laudo", "laudo-automatico", "relatorios", "agentes", "documentos"]);
+      return allowed.has(v) ? v : "laudo";
+    } catch {
+      return "laudo";
+    }
+  })();
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -1804,7 +1817,7 @@ export default function ProcessDetail() {
           </Card>
         )}
 
-        <Tabs defaultValue="laudo" className="space-y-6">
+        <Tabs defaultValue={defaultTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-7">
              <TabsTrigger value="processo">Processo</TabsTrigger>
              <TabsTrigger value="agendamento">Agendamento</TabsTrigger>
@@ -2737,6 +2750,12 @@ export default function ProcessDetail() {
               {/* 16. Resultados das Avaliações de Insalubridade */}
               {(() => {
                 const rc = safeParseJson(process.report_config, {}) as any;
+                const rcImgs = Array.isArray(rc?.item16_images) ? rc.item16_images : [];
+                const legacyUrl = String(rc?.item16_imageDataUrl || "").trim();
+                const legacyCaption = String(rc?.item16_imageCaption || "").trim();
+                const item16Images = (rcImgs.length
+                  ? rcImgs
+                  : (legacyUrl ? [{ dataUrl: legacyUrl, caption: legacyCaption }] : [])) as any[];
                 const processTemplates = ((rc.templates || []) as any[]) || [];
                 const combinedMap: Record<string, any> = {};
                 [...globalTemplates, ...processTemplates].forEach((t: any) => {
@@ -2751,6 +2770,14 @@ export default function ProcessDetail() {
                     onGenerateLLM={generateInsalubrityLLM}
                     rowsInAnalysis={annexesForInsalubrityLLM}
                     templates={combinedTemplates as any}
+                    images={item16Images as any}
+                    onImagesChange={(nextImages) => {
+                      const curr = safeParseJson(process.report_config, {}) as any;
+                      const nextRc = { ...curr, item16_images: nextImages } as any;
+                      try { delete nextRc.item16_imageDataUrl; } catch { nextRc.item16_imageDataUrl = undefined; }
+                      try { delete nextRc.item16_imageCaption; } catch { nextRc.item16_imageCaption = undefined; }
+                      updateProcess("report_config" as any, nextRc);
+                    }}
                     onCreateTemplate={handleAddTemplate}
                     onManageTemplates={() => setShowTemplates((v) => !v)}
                     onApplyTemplate={(t: any) => {
@@ -2858,6 +2885,12 @@ export default function ProcessDetail() {
               {/* 19. Resultados das Avaliações de Periculosidade */}
               {(() => {
                 const rc = safeParseJson(process.report_config, {}) as any;
+                const rcImgs = Array.isArray(rc?.item19_images) ? rc.item19_images : [];
+                const legacyUrl = String(rc?.item19_imageDataUrl || "").trim();
+                const legacyCaption = String(rc?.item19_imageCaption || "").trim();
+                const item19Images = (rcImgs.length
+                  ? rcImgs
+                  : (legacyUrl ? [{ dataUrl: legacyUrl, caption: legacyCaption }] : [])) as any[];
                 const processTemplates = ((rc.templates || []) as any[]) || [];
                 const combinedMap: Record<string, any> = {};
                 [...globalTemplates, ...processTemplates].forEach((t: any) => {
@@ -2877,6 +2910,14 @@ export default function ProcessDetail() {
                       onChange={(v) => updateProcess("periculosity_results", v)}
                       rowsInAnalysis={annexesForPericulosityLLM}
                       templates={periculosityTemplates as any}
+                      images={item19Images as any}
+                      onImagesChange={(nextImages) => {
+                        const curr = safeParseJson(process.report_config, {}) as any;
+                        const nextRc = { ...curr, item19_images: nextImages } as any;
+                        try { delete nextRc.item19_imageDataUrl; } catch { nextRc.item19_imageDataUrl = undefined; }
+                        try { delete nextRc.item19_imageCaption; } catch { nextRc.item19_imageCaption = undefined; }
+                        updateProcess("report_config" as any, nextRc);
+                      }}
                       onApplyTemplate={(t: any) => {
                         const prev = process.periculosity_results || "";
                         const parts = (t.nr16_annexes || []).sort((a:number,b:number)=>a-b).map((n:number) => {

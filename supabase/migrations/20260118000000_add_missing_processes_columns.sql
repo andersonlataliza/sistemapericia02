@@ -7,6 +7,13 @@ ALTER TABLE public.processes
 ALTER TABLE public.processes
   ADD COLUMN IF NOT EXISTS report_config jsonb DEFAULT '{"header":{"peritoName":"PERITO JUDICIAL","professionalTitle":"ENGENHEIRO CIVIL","registrationNumber":"CREA","customText":""},"footer":{"contactEmail":"contato@perito.com.br","customText":"","showPageNumbers":true}}'::jsonb;
 
+ALTER TABLE public.processes
+  ALTER COLUMN report_config SET DEFAULT '{"header":{"peritoName":"PERITO JUDICIAL","professionalTitle":"ENGENHEIRO CIVIL","registrationNumber":"CREA","customText":""},"footer":{"contactEmail":"contato@perito.com.br","customText":"","showPageNumbers":true}}'::jsonb;
+
+UPDATE public.processes
+  SET report_config = DEFAULT
+  WHERE report_config IS NULL;
+
 CREATE OR REPLACE FUNCTION public.admin_database_usage()
 RETURNS TABLE (
   db_size_bytes bigint,

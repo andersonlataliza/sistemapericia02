@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, Header, Footer, PageNumber, ImageRun, TableOfContents, PageBreak, HorizontalPositionAlign, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, VerticalPositionAlign, TextWrappingType, TabStopType } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, Header, Footer, PageNumber, ImageRun, TableOfContents, PageBreak, HorizontalPositionAlign, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, VerticalPositionAlign, TextWrappingType, TabStopType, UnderlineType, SectionType } from "docx";
 import jsPDF from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -179,6 +179,252 @@ function cmToPx(cm: number): number {
 
 function cmToTwip(cm: number): number {
   return Math.round(cm * 1440 / 2.54);
+}
+
+function cmToPt(cm: number): number {
+  return Math.round(cm * 72 / 2.54);
+}
+
+type AnnexResultChunk =
+  | { kind: 'text'; text: string }
+  | { kind: 'annex'; annex: number; title: string; lines: string[] };
+
+function parseAnnexResultsChunks(raw: string): AnnexResultChunk[] {
+  const text = String(raw || '').replace(/\r/g, '').trimEnd();
+  if (!text.trim()) return [];
+
+  const normalized = text.replace(/(\S)\s+(Resultado\s+Anexo\s*\d+\s*[—-])/gi, '$1\n\n$2');
+  const chunks = normalized.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+
+  const out: AnnexResultChunk[] = [];
+  const headingRe = /^(?:Resultado\s+)?Anexo\s*(\d+)\s*[—-]\s*/i;
+
+  for (const chunk of chunks) {
+    const subChunks = chunk
+      .split(/(?=Resultado\s+Anexo\s*\d+\s*[—-])/gi)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const sc of subChunks) {
+      const lines = sc.split(/\n/);
+      const firstLine = String(lines[0] || '').trim();
+      const m = firstLine.match(headingRe);
+      if (!m) {
+        out.push({ kind: 'text', text: sc });
+        continue;
+      }
+
+      const annex = Number(m[1]);
+      const afterPrefix = firstLine.slice(m[0].length).trim();
+      const dupRe = new RegExp(`\\bAnexo\\s*${annex}\\s*[—-]\\s*`, 'i');
+      const dupIdx = afterPrefix.search(dupRe);
+
+      let themePart = afterPrefix;
+      let tail = '';
+      if (dupIdx >= 0) {
+        themePart = afterPrefix.slice(0, dupIdx).trim();
+        tail = afterPrefix.slice(dupIdx).trim();
+        tail = tail.replace(new RegExp(`^Anexo\\s*${annex}\\s*[—-]\\s*[^|\\n]+`, 'i'), '').trim();
+        tail = tail.replace(/^\|\s*/, '').trim();
+      } else {
+        const pipeIdx = afterPrefix.indexOf('|');
+        if (pipeIdx >= 0) {
+          themePart = afterPrefix.slice(0, pipeIdx).trim();
+          tail = afterPrefix.slice(pipeIdx + 1).trim();
+        } else {
+          themePart = afterPrefix.split(/\n/)[0].trim();
+          tail = afterPrefix.slice(themePart.length).trim();
+        }
+      }
+
+      const title = themePart ? `Anexo ${annex} — ${themePart}`.trim() : `Anexo ${annex}`;
+      const remainder = lines.slice(1).join('\n').trim();
+      let body = [tail, remainder].filter(Boolean).join('\n').trim();
+      body = body.replace(/\s*\|\s*/g, '\n');
+      body = body.replace(/([^\n])\s+(Exposi[cç][aã]o:)/gi, '$1\n$2');
+      body = body.replace(/([^\n])\s+(Obs:)/gi, '$1\n$2');
+      body = body.replace(/([^\n])\s+(Observa[cç][aã]o(?:es)?:)/gi, '$1\n$2');
+      body = body.replace(/([^\n])\s+(Enquadramento:)/gi, '$1\n$2');
+
+      const bodyLines = body
+        .split(/\n/)
+        .map((l) => String(l || '').trim())
+        .filter(Boolean)
+        .filter((l) => !new RegExp(`^Anexo\\s*${annex}\\s*[—-]\\s*`, 'i').test(l));
+
+      out.push({ kind: 'annex', annex, title, lines: bodyLines.length ? bodyLines : ['----------'] });
+    }
+  }
+
+  const merged: AnnexResultChunk[] = [];
+  const isDash = (lines: string[]) => lines.length === 1 && String(lines[0] || '').trim() === '----------';
+  const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const normalizeLine = (l: string) => String(l || '').trim();
+
+  for (const item of out) {
+    if (item.kind !== 'annex') {
+      merged.push(item);
+      continue;
+    }
+
+    const last = merged[merged.length - 1];
+    if (last?.kind !== 'annex' || last.annex !== item.annex) {
+      merged.push(item);
+      continue;
+    }
+
+    if (sameLines(last.lines, item.lines)) {
+      continue;
+    }
+
+    if (isDash(last.lines) && !isDash(item.lines)) {
+      merged[merged.length - 1] = item;
+      continue;
+    }
+
+    if (!isDash(last.lines) && isDash(item.lines)) {
+      continue;
+    }
+
+    const seen = new Set(last.lines.map(normalizeLine));
+    const combined = [...last.lines];
+    for (const ln of item.lines) {
+      const key = normalizeLine(ln);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      combined.push(ln);
+    }
+    merged[merged.length - 1] = { ...last, lines: combined };
+  }
+
+  return merged;
+}
+
+function fitIntoBox(
+  naturalWidth: number,
+  naturalHeight: number,
+  boxWidth: number,
+  boxHeight: number
+): { width: number; height: number } {
+  const bw = Math.max(1, Math.round(boxWidth));
+  const bh = Math.max(1, Math.round(boxHeight));
+  const nw = Math.max(0, Math.round(naturalWidth || 0));
+  const nh = Math.max(0, Math.round(naturalHeight || 0));
+  if (!nw || !nh) return { width: bw, height: bh };
+  const scale = Math.min(bw / nw, bh / nh);
+  return {
+    width: Math.max(1, Math.round(nw * scale)),
+    height: Math.max(1, Math.round(nh * scale)),
+  };
+}
+
+const LAUDO_ITEM_IMAGE_BOX_CM = { width: 10, height: 6 };
+
+function textToDocxParagraphs(
+  raw: string,
+  options?: { fontSize?: number; after?: number }
+): (Paragraph | Table)[] {
+  const fontSize = options?.fontSize ?? 24;
+  const after = options?.after ?? 120;
+  const text = String(raw || "").replace(/\r/g, "").trimEnd();
+  if (!text.trim()) {
+    return [
+      new Paragraph({
+        children: [new TextRun({ text: "Não informado", size: fontSize })],
+        alignment: AlignmentType.JUSTIFIED,
+        spacing: { after, line: 360 },
+      }),
+    ];
+  }
+
+  const parsed = parseAnnexResultsChunks(text);
+  const hasAnnex = parsed.some((p) => p.kind === 'annex');
+
+  const buildPlainParagraphs = (rawBlock: string): Paragraph[] => {
+    const blocks = rawBlock
+      .split(/\n{2,}/)
+      .map((p) => p.replace(/\n\s+\n/g, "\n\n").trim())
+      .filter(Boolean);
+    return blocks.map((b) => {
+      const lines = b.split(/\n/);
+      const isBullet = /^[-•]\s+/.test(lines[0] || "");
+      const align = isBullet ? AlignmentType.LEFT : AlignmentType.JUSTIFIED;
+      const children = lines
+        .filter((l) => l != null)
+        .map((line, idx) =>
+          new TextRun({
+            text: String(line),
+            size: fontSize,
+            break: idx === 0 ? undefined : 1,
+          } as any)
+        );
+      return new Paragraph({
+        children,
+        alignment: align,
+        spacing: { after, line: 360 },
+      });
+    });
+  };
+
+  if (!hasAnnex) {
+    return buildPlainParagraphs(text);
+  }
+
+  const border = { style: BorderStyle.SINGLE, size: 6, color: "000000" };
+  const out: (Paragraph | Table)[] = [];
+  parsed.forEach((p) => {
+    if (p.kind === 'text') {
+      out.push(...buildPlainParagraphs(p.text));
+      return;
+    }
+
+    out.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        alignment: AlignmentType.CENTER,
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: { top: border, bottom: border, left: border, right: border },
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: p.title,
+                        size: fontSize,
+                        bold: true,
+                        underline: { type: UnderlineType.SINGLE },
+                      } as any),
+                    ],
+                    alignment: AlignmentType.LEFT,
+                    spacing: { after: 0, line: 360 },
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      })
+    );
+
+    const bodyRuns = p.lines.map((line, idx) =>
+      new TextRun({
+        text: String(line),
+        size: fontSize,
+        break: idx === 0 ? undefined : 1,
+      } as any)
+    );
+    const mostlyShort = p.lines.length >= 2 && p.lines.every((l) => String(l).length <= 90);
+    out.push(
+      new Paragraph({
+        children: bodyRuns,
+        alignment: mostlyShort ? AlignmentType.LEFT : AlignmentType.JUSTIFIED,
+        spacing: { after: 180, line: 360 },
+      })
+    );
+  });
+
+  return out;
 }
 
 async function createProfessionalHeader(process: ProcessData): Promise<Paragraph[]> {
@@ -521,15 +767,14 @@ function createCoverDocxSection(process: ProcessData) {
   if (defendantName) blocks.push(new Paragraph({ children: [ new TextRun({ text: `Reclamada: ${defendantName}`, size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { line: 360, after: cmToTwip(3) } }));
 
   blocks.push(new Paragraph({ children: [ new TextRun({ text: bodyText, size: 24 }) ], alignment: AlignmentType.JUSTIFIED, spacing: { line: 360, after: 20 } }));
-  blocks.push(new Paragraph({ children: [ new TextRun({ text: `${city}, ${datePt}`, size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { after: cmToTwip(5) } }));
-  blocks.push(new Paragraph({ children: [ new TextRun({ text: "Termos em que, para os devidos fins. Pede e espera deferimento.", size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { after: cmToTwip(2) } }));
+  blocks.push(new Paragraph({ children: [ new TextRun({ text: `${city}, ${datePt}`, size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { line: 360, after: 300 } }));
+  blocks.push(new Paragraph({ children: [ new TextRun({ text: "Termos em que, para os devidos fins. Pede e espera deferimento.", size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { line: 360, after: 500 } }));
 
   blocks.push(new Paragraph({ children: [ new TextRun({ text: "_________________________________", size: 24 }) ], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 30 } }));
   blocks.push(new Paragraph({ children: [ new TextRun({ text: peritoName, bold: true, size: 24 }) ], alignment: AlignmentType.CENTER }));
   blocks.push(new Paragraph({ children: [ new TextRun({ text: professionalTitle, size: 24 }) ], alignment: AlignmentType.CENTER }));
   blocks.push(new Paragraph({ children: [ new TextRun({ text: registrationNumber, size: 24 }) ], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
 
-  blocks.push(new Paragraph({ children: [ new PageBreak() ] }));
   return blocks;
 }
 
@@ -582,10 +827,30 @@ function createDefendantDataSection(process: ProcessData) {
   ];
 }
 
-function createInsalubrityResultsSection(process: ProcessData, sectionNumber: number) {
+async function createInsalubrityResultsSection(process: ProcessData, sectionNumber: number) {
   const results = process.insalubrity_results || "Não foram identificados agentes de risco que caracterizem insalubridade.";
-  
-  return [
+  const flags = getDocxFlags(process);
+  const rcAny: any = (() => {
+    try {
+      return typeof (process as any).report_config === 'string' ? JSON.parse((process as any).report_config || '{}') : ((process as any).report_config || {});
+    } catch {
+      return (process as any).report_config || {};
+    }
+  })();
+  const item16Images = !flags.safeMode
+    ? (Array.isArray(rcAny?.item16_images) ? rcAny.item16_images : [])
+    : [];
+  const legacy16Url = !flags.safeMode ? String(rcAny?.item16_imageDataUrl || "").trim() : "";
+  const legacy16Caption = String(rcAny?.item16_imageCaption || "").trim();
+  const normalized16Images: Array<{ dataUrl: string; caption?: string }> = (item16Images.length
+    ? item16Images
+    : (legacy16Url ? [{ dataUrl: legacy16Url, caption: legacy16Caption }] : []))
+    .map((x: any) => ({ dataUrl: String(x?.dataUrl || '').trim(), caption: String(x?.caption || '').trim() }))
+    .filter((x) => x.dataUrl);
+
+  const resultParagraphs = textToDocxParagraphs(fixGrammar(results), { fontSize: 24, after: 120 });
+
+  const blocks: (Paragraph | Table)[] = [
     new Paragraph({
       children: [
         new TextRun({
@@ -597,17 +862,53 @@ function createInsalubrityResultsSection(process: ProcessData, sectionNumber: nu
       heading: HeadingLevel.HEADING_1,
       spacing: { before: 400, after: 200 },
     }),
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: fixGrammar(results),
-          size: 24,
-        }),
-      ],
-      spacing: { after: 200, line: 360 },
-      alignment: AlignmentType.JUSTIFIED,
-    }),
+
+    ...resultParagraphs,
+
+    ...(normalized16Images.length
+      ? (await (async () => {
+          try {
+            const makeCellForImage = async (img?: { dataUrl: string; caption?: string }): Promise<TableCell> => {
+              const children: Paragraph[] = [];
+              if (img?.dataUrl) {
+                const mediaType = getSupportedImageType(img.dataUrl);
+                if (mediaType) {
+                  const dims = await getDataUrlDims(img.dataUrl);
+                  const targetPxW = 280;
+                  const targetPxH = dims?.naturalWidth && dims?.naturalHeight
+                    ? Math.round(targetPxW * (dims.naturalHeight / dims.naturalWidth))
+                    : 160;
+                  const bytes = dataUrlToUint8Array(img.dataUrl);
+                  const imgRun = new ImageRun({ data: bytes, transformation: { width: targetPxW, height: targetPxH }, type: mediaType });
+                  children.push(new Paragraph({ children: [imgRun], alignment: AlignmentType.CENTER }));
+                }
+                const cap = String(img.caption || '').trim();
+                if (cap) {
+                  children.push(new Paragraph({ children: [new TextRun({ text: cap, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 120, line: 360 } }));
+                }
+              }
+              return new TableCell({ children });
+            };
+
+            const rows: TableRow[] = [];
+            for (let i = 0; i < normalized16Images.length; i += 2) {
+              const left = await makeCellForImage(normalized16Images[i]);
+              const right = await makeCellForImage(normalized16Images[i + 1]);
+              rows.push(new TableRow({ children: [left, right] }));
+            }
+
+            return [
+              new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }),
+              new Paragraph({ spacing: { after: 200 } }),
+            ];
+          } catch {
+            return [] as any[];
+          }
+        })())
+      : []),
   ];
+
+  return blocks;
 }
 
 function createAnnexTable() {
@@ -689,19 +990,17 @@ function createAnnexTable() {
   });
 }
 
-async function createFooterContact(process: ProcessData) {
-  // Usar configurações personalizadas se disponíveis
+async function createFooterContact(process: ProcessData, options?: { showPageNumbers?: boolean }) {
   const reportConfig = process.report_config?.footer;
-  const coverData = process.cover_data || {};
   const flags = getDocxFlags(process);
-  
-  const contactEmail = "";
-  const customText = "";
-  const showPageNumbers = false;
+
+  const contactEmail = String(reportConfig?.contactEmail || "").trim();
+  const customText = String(reportConfig?.customText || "").trim();
+  const showPageNumbers = options?.showPageNumbers ?? (reportConfig?.showPageNumbers !== false);
   const footerAlign: 'left' | 'center' | 'right' = (reportConfig?.fillPage ? 'left' : (reportConfig?.imageAlign || 'left'));
   const fillPage = reportConfig?.fillPage !== false; // padrão preencher
-  
-  const footerElements = [];
+
+  const footerElements: Paragraph[] = [];
 
   // Imagem de rodapé, se configurada
   try {
@@ -758,8 +1057,7 @@ async function createFooterContact(process: ProcessData) {
     // ignore
   }
 
-  // Adicionar texto personalizado se fornecido
-  if (false) {
+  if (customText) {
     footerElements.push(
       new Paragraph({
         children: [
@@ -774,8 +1072,7 @@ async function createFooterContact(process: ProcessData) {
     );
   }
 
-  // Adicionar e-mail de contato
-  if (false) {
+  if (contactEmail) {
     footerElements.push(
       new Paragraph({
         children: [
@@ -2258,8 +2555,30 @@ function createFlammableDefinitionSection(process: ProcessData, sectionNumber: n
   ];
 }
 
-function createPericulosityResultsSection(process: ProcessData, sectionNumber: number) {
-  return [
+async function createPericulosityResultsSection(process: ProcessData, sectionNumber: number) {
+  const results = process.periculosity_results || "Não foram identificados agentes de risco que caracterizem periculosidade.";
+  const flags = getDocxFlags(process);
+  const rcAny: any = (() => {
+    try {
+      return typeof (process as any).report_config === "string" ? JSON.parse((process as any).report_config || "{}") : ((process as any).report_config || {});
+    } catch {
+      return (process as any).report_config || {};
+    }
+  })();
+  const item19Images = !flags.safeMode
+    ? (Array.isArray(rcAny?.item19_images) ? rcAny.item19_images : [])
+    : [];
+  const legacy19Url = !flags.safeMode ? String(rcAny?.item19_imageDataUrl || "").trim() : "";
+  const legacy19Caption = String(rcAny?.item19_imageCaption || "").trim();
+  const normalized19Images: Array<{ dataUrl: string; caption?: string }> = (item19Images.length
+    ? item19Images
+    : (legacy19Url ? [{ dataUrl: legacy19Url, caption: legacy19Caption }] : []))
+    .map((x: any) => ({ dataUrl: String(x?.dataUrl || '').trim(), caption: String(x?.caption || '').trim() }))
+    .filter((x) => x.dataUrl);
+
+  const resultParagraphs = textToDocxParagraphs(fixGrammar(results), { fontSize: 24, after: 120 });
+
+  const blocks: (Paragraph | Table)[] = [
     new Paragraph({
       children: [
         new TextRun({
@@ -2271,17 +2590,53 @@ function createPericulosityResultsSection(process: ProcessData, sectionNumber: n
       heading: HeadingLevel.HEADING_1,
       spacing: { before: 400, after: 200 },
     }),
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: fixGrammar(process.periculosity_results || "Não foram identificados agentes de risco que caracterizem periculosidade."),
-          size: 24,
-        }),
-      ],
-      spacing: { after: 300, line: 360 },
-      alignment: AlignmentType.JUSTIFIED,
-    }),
+
+    ...resultParagraphs,
+
+    ...(normalized19Images.length
+      ? (await (async () => {
+          try {
+            const makeCellForImage = async (img?: { dataUrl: string; caption?: string }): Promise<TableCell> => {
+              const children: Paragraph[] = [];
+              if (img?.dataUrl) {
+                const mediaType = getSupportedImageType(img.dataUrl);
+                if (mediaType) {
+                  const dims = await getDataUrlDims(img.dataUrl);
+                  const targetPxW = 280;
+                  const targetPxH = dims?.naturalWidth && dims?.naturalHeight
+                    ? Math.round(targetPxW * (dims.naturalHeight / dims.naturalWidth))
+                    : 160;
+                  const bytes = dataUrlToUint8Array(img.dataUrl);
+                  const imgRun = new ImageRun({ data: bytes, transformation: { width: targetPxW, height: targetPxH }, type: mediaType });
+                  children.push(new Paragraph({ children: [imgRun], alignment: AlignmentType.CENTER }));
+                }
+                const cap = String(img.caption || '').trim();
+                if (cap) {
+                  children.push(new Paragraph({ children: [new TextRun({ text: cap, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 120, line: 360 } }));
+                }
+              }
+              return new TableCell({ children });
+            };
+
+            const rows: TableRow[] = [];
+            for (let i = 0; i < normalized19Images.length; i += 2) {
+              const left = await makeCellForImage(normalized19Images[i]);
+              const right = await makeCellForImage(normalized19Images[i + 1]);
+              rows.push(new TableRow({ children: [left, right] }));
+            }
+
+            return [
+              new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }),
+              new Paragraph({ spacing: { after: 200 } }),
+            ];
+          } catch {
+            return [] as any[];
+          }
+        })())
+      : []),
   ];
+
+  return blocks;
 }
 
 async function createConclusionSection(process: ProcessData, sectionNumber: number) {
@@ -2379,11 +2734,11 @@ export async function exportReportAsDocx(
     const tables = (rc?.analysis_tables || {}) as any;
     const rows15 = Array.isArray(tables?.nr15) ? tables.nr15 : [];
     const rows16 = Array.isArray(tables?.nr16) ? tables.nr16 : [];
-    const hasSelected = (rows: any[]) =>
-      rows.some((r) => {
-        const exp = String(r?.exposure ?? '').trim();
-        return exp === 'Em análise' || exp === 'Ocorre exposição';
-      });
+    const isMarkedExposure = (value: any) => {
+      const s = String(value ?? '').trim().toLowerCase();
+      return s === 'em análise' || s === 'em analise' || s === 'ocorre exposição' || s === 'ocorre exposicao';
+    };
+    const hasSelected = (rows: any[]) => rows.some((r) => isMarkedExposure(r?.exposure));
     const hasNr15Rows = hasSelected(rows15);
     const hasNr16Rows = hasSelected(rows16);
     const normText = (t: any) => {
@@ -2407,8 +2762,13 @@ export async function exportReportAsDocx(
       ?? ((hasNr15Rows || hasInsalubridadeText) && !(hasNr16Rows || hasPericulosidadeText) ? 'insalubridade' : undefined)
       ?? ((hasNr16Rows || hasPericulosidadeText) && !(hasNr15Rows || hasInsalubridadeText) ? 'periculosidade' : undefined)
       ?? 'completo';
-    const includeInsalubridade = reportType === 'insalubridade' || reportType === 'completo';
-    const includePericulosidade = reportType === 'periculosidade' || reportType === 'completo';
+    let includeInsalubridade = reportType === 'insalubridade' || reportType === 'completo';
+    const periculosidadeExplicitlySetNoExposure = rows16.length > 0 && !hasNr16Rows;
+    const includePericulosidadeBase = reportType === 'periculosidade' || reportType === 'completo';
+    const includePericulosidade = includePericulosidadeBase && !periculosidadeExplicitlySetNoExposure && (hasNr16Rows || hasPericulosidadeText);
+    if (!includeInsalubridade && !includePericulosidade) {
+      includeInsalubridade = hasNr15Rows || hasInsalubridadeText;
+    }
 
     let nextNumber = 16;
     const insalubrityResultsNumber = includeInsalubridade ? nextNumber++ : undefined;
@@ -2417,6 +2777,35 @@ export async function exportReportAsDocx(
     const periculosityResultsNumber = includePericulosidade ? nextNumber++ : undefined;
     const quesitosNumber = nextNumber++;
     const conclusaoNumber = nextNumber++;
+
+    const page = {
+      margin: {
+        top: headerCfg?.fillPage ? cmToTwip(3.04) : 1440,
+        bottom: footerCfg?.fillPage ? cmToTwip(3.04) : 1440,
+        left: 1440,
+        right: 1440,
+        header: 0,
+        footer: 0,
+        gutter: 0,
+      },
+      size: {
+        width: cmToTwip(21.0),
+        height: cmToTwip(29.7),
+      },
+    };
+
+    const header = new Header({
+      children: await createProfessionalHeader(process),
+    });
+    const silentFooter = new Footer({
+      children: await createFooterContact(process, { showPageNumbers: false }),
+    });
+    const numberedFooter = new Footer({
+      children: await createFooterContact(process),
+    });
+
+    const includeToc = rc?.flags?.include_docx_toc !== false;
+
     const doc = new Document({
       features: { updateFields: true },
       styles: {
@@ -2460,74 +2849,70 @@ export async function exportReportAsDocx(
           },
         ],
       },
-      sections: [{
-        properties: {
-          page: {
-            margin: {
-              top: headerCfg?.fillPage ? cmToTwip(3.04) : 1440,
-              bottom: footerCfg?.fillPage ? cmToTwip(3.04) : 1440,
-              left: 1440,
-              right: 1440,
-              header: 0,
-              footer: 0,
-              gutter: 0,
-            },
-            size: {
-              width: cmToTwip(21.0),
-              height: cmToTwip(29.7),
-            },
+      sections: [
+        {
+          properties: {
+            page,
+            type: SectionType.NEXT_PAGE,
           },
+          headers: { default: header },
+          footers: { default: silentFooter },
+          children: createCoverDocxSection(process),
         },
-        headers: {
-          default: new Header({
-            children: await createProfessionalHeader(process),
-          }),
+        ...(includeToc
+          ? [
+              {
+                properties: {
+                  page,
+                  type: SectionType.NEXT_PAGE,
+                },
+                headers: { default: header },
+                footers: { default: silentFooter },
+                children: [
+                  new Paragraph({
+                    children: [new TextRun({ text: "SUMÁRIO", bold: true, size: 28 })],
+                    spacing: { before: 200, after: 100 },
+                  }),
+                  new TableOfContents("\u00A0", { hyperlink: false, headingStyleRange: "1-7" }),
+                  new Paragraph({ spacing: { after: 300 } }),
+                ],
+              },
+            ]
+          : []),
+        {
+          properties: {
+            page: { ...page, pageNumbers: { start: 1 } },
+            type: SectionType.NEXT_PAGE,
+          },
+          headers: { default: header },
+          footers: { default: numberedFooter },
+          children: [
+            ...createProcessIdentification(process),
+            ...createClaimantDataSection(process),
+            ...createDefendantDataSection(process),
+            ...createObjectiveSection(process),
+            ...createInitialDataSection(process),
+            ...createDefenseDataSection(process),
+            ...createDiligencesSection(process),
+            ...createAttendeesSection(process),
+            ...createMethodologySection(process),
+            ...createClaimantActivitiesSection(process),
+            ...createWorkplaceCharacteristicsSection(process),
+            ...createActivitiesSection(process),
+            ...(await createPhotoRegisterDocxSection(process)),
+            ...createDiscordancesPresentedSection(process),
+            ...createEPISection(process),
+            ...createEPCSection(process),
+            ...createInsalubrityExposuresSection(process, { includeInsalubridade, includePericulosidade }),
+            ...(includeInsalubridade && insalubrityResultsNumber != null ? await createInsalubrityResultsSection(process, insalubrityResultsNumber) : []),
+            ...(includePericulosidade && periculosityConceptNumber != null ? createPericulosityConceptSection(process, periculosityConceptNumber) : []),
+            ...(includePericulosidade && flammableDefinitionNumber != null ? createFlammableDefinitionSection(process, flammableDefinitionNumber) : []),
+            ...(includePericulosidade && periculosityResultsNumber != null ? await createPericulosityResultsSection(process, periculosityResultsNumber) : []),
+            ...createQuestionnairesSection(process, quesitosNumber),
+            ...(await createConclusionSection(process, conclusaoNumber)),
+          ],
         },
-        footers: {
-          default: new Footer({
-            children: await createFooterContact(process),
-          }),
-        },
-        children: [
-          ...createCoverDocxSection(process),
-          // SUMÁRIO / ÍNDICE automático com base nos headings
-          ...(function(){
-            const includeToc = rc?.flags?.include_docx_toc !== false;
-            if (!includeToc) return [] as (Paragraph | Table)[];
-            return [
-              new Paragraph({
-                children: [ new TextRun({ text: "SUMÁRIO", bold: true, size: 28 }) ],
-                spacing: { before: 200, after: 100 },
-              }),
-              new TableOfContents("", { hyperlink: false, headingStyleRange: "1-7" }),
-              new Paragraph({ spacing: { after: 300 } }),
-            ];
-          })(),
-          ...createProcessIdentification(process),
-          ...createClaimantDataSection(process),
-          ...createDefendantDataSection(process),
-          ...createObjectiveSection(process),
-          ...createInitialDataSection(process),
-          ...createDefenseDataSection(process),
-          ...createDiligencesSection(process),
-          ...createAttendeesSection(process),
-          ...createMethodologySection(process),
-          ...createClaimantActivitiesSection(process),
-          ...createWorkplaceCharacteristicsSection(process),
-          ...createActivitiesSection(process),
-          ...(await createPhotoRegisterDocxSection(process)),
-          ...createDiscordancesPresentedSection(process),
-          ...createEPISection(process),
-          ...createEPCSection(process),
-          ...createInsalubrityExposuresSection(process, { includeInsalubridade, includePericulosidade }),
-          ...(includeInsalubridade && insalubrityResultsNumber != null ? createInsalubrityResultsSection(process, insalubrityResultsNumber) : []),
-          ...(includePericulosidade && periculosityConceptNumber != null ? createPericulosityConceptSection(process, periculosityConceptNumber) : []),
-          ...(includePericulosidade && flammableDefinitionNumber != null ? createFlammableDefinitionSection(process, flammableDefinitionNumber) : []),
-          ...(includePericulosidade && periculosityResultsNumber != null ? createPericulosityResultsSection(process, periculosityResultsNumber) : []),
-          ...createQuestionnairesSection(process, quesitosNumber),
-          ...(await createConclusionSection(process, conclusaoNumber)),
-        ],
-      }],
+      ],
     });
 
     // No navegador, usar toBlob (evita 'nodebuffer is not supported')
@@ -2590,7 +2975,7 @@ export async function exportReportAsPdf(
     const professionalTitle = coverData.professionalTitle || "ENGENHEIRO DE SEGURANÇA DO TRABALHO";
     const registrationNumber = coverData.registrationNumber || "CREA 5063101637";
     
-    let currentPage = 1;
+    let currentPage = 0;
     let cursorY = 0;
 
     const parseRcType = (rcAny: any) => {
@@ -2612,11 +2997,11 @@ export async function exportReportAsPdf(
     const tablesType = (rcType?.analysis_tables || {}) as any;
     const rows15 = Array.isArray(tablesType?.nr15) ? tablesType.nr15 : [];
     const rows16 = Array.isArray(tablesType?.nr16) ? tablesType.nr16 : [];
-    const hasSelected = (rows: any[]) =>
-      rows.some((r) => {
-        const exp = String(r?.exposure ?? '').trim();
-        return exp === 'Em análise' || exp === 'Ocorre exposição';
-      });
+    const isMarkedExposure = (value: any) => {
+      const s = String(value ?? '').trim().toLowerCase();
+      return s === 'em análise' || s === 'em analise' || s === 'ocorre exposição' || s === 'ocorre exposicao';
+    };
+    const hasSelected = (rows: any[]) => rows.some((r) => isMarkedExposure(r?.exposure));
     const hasNr15Rows = hasSelected(rows15);
     const hasNr16Rows = hasSelected(rows16);
     const normText = (t: any) => {
@@ -2641,8 +3026,13 @@ export async function exportReportAsPdf(
       ?? ((hasNr16Rows || hasPericulosidadeText) && !(hasNr15Rows || hasInsalubridadeText) ? 'periculosidade' : undefined)
       ?? 'completo';
 
-    const includeInsalubridade = reportType === 'insalubridade' || reportType === 'completo';
-    const includePericulosidade = reportType === 'periculosidade' || reportType === 'completo';
+    let includeInsalubridade = reportType === 'insalubridade' || reportType === 'completo';
+    const periculosidadeExplicitlySetNoExposure = rows16.length > 0 && !hasNr16Rows;
+    const includePericulosidadeBase = reportType === 'periculosidade' || reportType === 'completo';
+    const includePericulosidade = includePericulosidadeBase && !periculosidadeExplicitlySetNoExposure && (hasNr16Rows || hasPericulosidadeText);
+    if (!includeInsalubridade && !includePericulosidade) {
+      includeInsalubridade = hasNr15Rows || hasInsalubridadeText;
+    }
 
     let nextNumber = 16;
     const insalubrityResultsNumber = includeInsalubridade ? nextNumber++ : undefined;
@@ -2670,6 +3060,49 @@ export async function exportReportAsPdf(
     const hasClaimant = !!claimantText || (Array.isArray(claimantQuesitos) && claimantQuesitos.length > 0);
     const hasDefendant = !!defendantQuesitosText || (Array.isArray(respondentQuesitos) && respondentQuesitos.length > 0);
     const hasJudge = !!judgeText || (Array.isArray(judgeQuesitos) && judgeQuesitos.length > 0);
+
+    const tocPages = new Map<string, number>();
+    const tocNumberSlots: Array<{ title: string; pageIndex: number; y: number; fontSize: number }> = [];
+    const tocTitleBySectionKey: Record<string, string> = {
+      "1": "1 - Identificações",
+      "2": "2 - Dados da Reclamante",
+      "3": "3 - Dados da Reclamada",
+      "4": "4 - Objetivo",
+      "5": "5 - Dados da Inicial",
+      "6": "6 - Dados da Contestação da Reclamada",
+      "7": "7 - Diligências / Vistorias",
+      "8": "8 - Acompanhantes / Entrevistados",
+      "9": "9 - Metodologia de Avaliação",
+      "10": "10 - Documentações Apresentadas",
+      "11": "11 - Características do Local de Trabalho",
+      "12": "12 - Atividades da(o) Reclamante",
+      "12.1": "12.1 - Registro fotográfico",
+      "12.2": "12.2 - Discordâncias apresentadas pela reclamada",
+      "13": "13 - Equipamentos de Proteção Individual (EPIs)",
+      "14": "14 - Equipamentos de Proteção Coletiva",
+      "15": "15 - Análise das exposições",
+    };
+    if (includeInsalubridade && insalubrityResultsNumber != null) {
+      tocTitleBySectionKey[String(insalubrityResultsNumber)] = `${insalubrityResultsNumber} - Resultados das avaliações referentes à insalubridade`;
+    }
+    if (includePericulosidade) {
+      if (periculosityConceptNumber != null) {
+        tocTitleBySectionKey[String(periculosityConceptNumber)] = `${periculosityConceptNumber} - Conceito de Periculosidade`;
+      }
+      if (flammableDefinitionNumber != null) {
+        tocTitleBySectionKey[String(flammableDefinitionNumber)] = `${flammableDefinitionNumber} - Definição de produtos inflamáveis`;
+      }
+      if (periculosityResultsNumber != null) {
+        tocTitleBySectionKey[String(periculosityResultsNumber)] = `${periculosityResultsNumber} - Resultados das avaliações referentes à Periculosidade`;
+      }
+    }
+    if (hasClaimant || hasDefendant || hasJudge) {
+      tocTitleBySectionKey[String(quesitosNumber)] = `${quesitosNumber} - Quesitos da Perícia`;
+      if (hasClaimant) tocTitleBySectionKey[`${quesitosNumber}.1`] = `${quesitosNumber}.1 - Quesitos da Reclamante`;
+      if (hasDefendant) tocTitleBySectionKey[`${quesitosNumber}.2`] = `${quesitosNumber}.2 - Quesitos da Reclamada`;
+      if (hasJudge) tocTitleBySectionKey[`${quesitosNumber}.3`] = `${quesitosNumber}.3 - Quesitos do Juíz(a)`;
+    }
+    tocTitleBySectionKey[String(conclusaoNumber)] = `${conclusaoNumber} - Conclusão`;
 
     // Utilitário para carregar imagem como DataURL e detectar formato
     const loadImageAsDataUrl = async (url: string): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG'; naturalWidth: number; naturalHeight: number }> => {
@@ -2982,10 +3415,10 @@ export async function exportReportAsPdf(
     };
 
     const addPage = () => {
-      if (currentPage > 1) {
+      if (currentPage >= 1) {
         doc.addPage();
       }
-      currentPage++;
+      currentPage += 1;
       cursorY = 50;
       renderHeaderFooterImages();
       // Garantir que o conteúdo não sobreponha o cabeçalho
@@ -3006,6 +3439,20 @@ export async function exportReportAsPdf(
       doc.setFontSize(fontSize);
       doc.setFont("helvetica", isBold ? "bold" : "normal");
       const rawLines = String(text || "").split(/\r?\n/);
+
+      let tocTitleToMark: string | undefined;
+      if (isBold && fontSize >= 13) {
+        const firstNonEmpty = rawLines.find((l) => String(l || "").trim().length > 0);
+        const head = String(firstNonEmpty || "").trim();
+        const m = head.match(/^(\d+(?:\.\d+)?)(?:\s*[\.\-])?\s+/);
+        if (m) {
+          const key = String(m[1] || "");
+          const mapped = tocTitleBySectionKey[key];
+          if (mapped) tocTitleToMark = mapped;
+        }
+      }
+      let tocMarked = false;
+
       for (const raw of rawLines) {
         if (!raw.trim()) {
           cursorY += (fontSize + 8) * lineSpacingMultiplier;
@@ -3016,6 +3463,10 @@ export async function exportReportAsPdf(
           const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
           if (cursorY > pageHeight - reservedBottom) {
             addPage();
+          }
+          if (tocTitleToMark && !tocMarked && !tocPages.has(tocTitleToMark)) {
+            tocPages.set(tocTitleToMark, currentPage);
+            tocMarked = true;
           }
           let x = marginLeft;
           if (align === 'center') {
@@ -3109,6 +3560,77 @@ export async function exportReportAsPdf(
         } else {
           addParagraphJustified(clean, fontSize);
         }
+      });
+    };
+
+    const addCompactLeftLines = (lines: string[], fontSize = 12) => {
+      doc.setFontSize(fontSize);
+      doc.setFont('helvetica', 'normal');
+      const maxChars = Math.max(20, Math.floor(contentWidth / (fontSize * 0.6)));
+      for (const raw of lines) {
+        const line = String(raw || '').trim();
+        if (!line) {
+          cursorY += fontSize * 1.2;
+          continue;
+        }
+        const wrapped = wrapText(sanitizeLegalText(line), maxChars);
+        for (const w of wrapped) {
+          const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+          if (cursorY > pageHeight - reservedBottom) {
+            addPage();
+          }
+          doc.text(w, marginLeft, cursorY);
+          cursorY += fontSize + 4;
+        }
+        cursorY += 2;
+      }
+    };
+
+    const addAnnexResultsWithThemeBox = (raw: string, fontSize = 12) => {
+      const base = fixGrammar(String(raw || ''));
+      const parsed = parseAnnexResultsChunks(base);
+      const hasAnnex = parsed.some((p) => p.kind === 'annex');
+      if (!hasAnnex) {
+        addParagraphSmartJustified(base, fontSize);
+        return;
+      }
+
+      parsed.forEach((p) => {
+        if (p.kind === 'text') {
+          addParagraphSmartJustified(p.text, fontSize);
+          cursorY += 6;
+          return;
+        }
+
+        const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+        const boxPaddingX = 4;
+        const boxPaddingY = 3;
+        const boxH = fontSize + boxPaddingY * 2 + 2;
+
+        const approxBodyH = Math.max(1, p.lines.length) * (fontSize + 6) + 10;
+        if (cursorY + boxH + approxBodyH > pageHeight - reservedBottom) {
+          addPage();
+        }
+
+        const boxX = marginLeft;
+        const boxW = contentWidth;
+        const boxY = cursorY - (fontSize - 2) - boxPaddingY;
+        doc.setLineWidth(0.3);
+        doc.rect(boxX, boxY, boxW, boxH);
+
+        doc.setFontSize(fontSize);
+        doc.setFont('helvetica', 'bold');
+        const title = sanitizeLegalText(p.title);
+        const titleX = boxX + boxPaddingX;
+        const titleY = boxY + boxPaddingY + fontSize - 1;
+        doc.text(title, titleX, titleY);
+        const titleW = doc.getTextWidth(title);
+        doc.line(titleX, titleY + 1, titleX + titleW, titleY + 1);
+
+        cursorY = boxY + boxH + 8;
+        doc.setFont('helvetica', 'normal');
+        addCompactLeftLines(p.lines, fontSize);
+        cursorY += 8;
       });
     };
 
@@ -3308,15 +3830,15 @@ export async function exportReportAsPdf(
     cursorY += 30;
     
     // Dados do processo
-    addText(`Proc.: ${process.process_number || ''}`, 12);
+    addText(`Proc.: ${process.process_number || ''}`, 12, false, 'left', 1.5);
     // Terminologia trabalhista padronizada: Reclamante/Reclamada
-    addText(`Reclamante: ${process.claimant_name || ''}`, 12);
+    addText(`Reclamante: ${process.claimant_name || ''}`, 12, false, 'left', 1.5);
     // Sanitizar possível texto de advogado acoplado ao nome da reclamada
     const defendantSanitizedCover = String(process.defendant_name || '')
       .replace(/\bADVOGAD[OA]\s*:\s*[^\n]+/gi, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
-    addText(`Reclamada: ${defendantSanitizedCover}`, 12);
+    addText(`Reclamada: ${defendantSanitizedCover}`, 12, false, 'left', 1.5);
     
     cursorY += 30;
     
@@ -3365,22 +3887,28 @@ export async function exportReportAsPdf(
       doc.setFont("helvetica", "normal");
       if (cursorY > pageHeight - 100) addPage();
 
+      const linePageIndex = currentPage;
+      const pageNumberY = cursorY;
+
       const titleX = marginLeft;
       const titleWidth = doc.getTextWidth(title);
+      const xRight = pageWidth - marginRight;
+      const reservedWidth = doc.getTextWidth("0000");
+      const leadersEndX = xRight - reservedWidth;
       const pageText = pageNumber == null ? "" : String(pageNumber);
-      const pageTextWidth = doc.getTextWidth(pageText);
-      const pageX = pageWidth - marginRight - pageTextWidth;
+      const pageTextWidth = pageText ? doc.getTextWidth(pageText) : 0;
+      const pageX = xRight - pageTextWidth;
 
       doc.text(title, titleX, cursorY);
-      const lineY = cursorY - fontSize * 0.35;
+      const dottedLineY = cursorY - fontSize * 0.35;
       const startX = titleX + titleWidth + 6;
-      const endX = pageX - 6;
+      const endX = leadersEndX - 6;
       if (endX > startX) {
         // Alguns typings de jsPDF não expõem setLineDash; usamos cast para evitar erro de TS
         const anyDoc = doc as any;
         if (typeof anyDoc.setLineDash === 'function') {
           anyDoc.setLineDash([1, 2], 0);
-          doc.line(startX, lineY, endX, lineY);
+            doc.line(startX, dottedLineY, endX, dottedLineY);
           anyDoc.setLineDash();
         } else {
           // Fallback: desenha uma sequência de pontos manualmente
@@ -3392,6 +3920,8 @@ export async function exportReportAsPdf(
       }
       if (pageText) {
         doc.text(pageText, pageX, cursorY);
+      } else {
+        tocNumberSlots.push({ title, pageIndex: linePageIndex, y: pageNumberY, fontSize });
       }
       cursorY += fontSize * 1.5;
     };
@@ -3446,13 +3976,13 @@ export async function exportReportAsPdf(
     addText("1. IDENTIFICAÇÕES", 14, true);
     cursorY += 10;
     // Campos: número do processo, reclamante e reclamada (sem advogado e sem vara)
-    addText(`Número do Processo: ${process.process_number || 'Não informado'}`, 12);
-    addText(`Reclamante: ${process.claimant_name || 'Não informado'}`, 12);
+    addText(`Número do Processo: ${process.process_number || 'Não informado'}`, 12, false, 'left', 1.5);
+    addText(`Reclamante: ${process.claimant_name || 'Não informado'}`, 12, false, 'left', 1.5);
     const defendantSanitized = String(process.defendant_name || '')
       .replace(/\bADVOGAD[OA]\s*:\s*[^\n]+/gi, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
-    addText(`Reclamada: ${defendantSanitized || 'Não informado'}`, 12);
+    addText(`Reclamada: ${defendantSanitized || 'Não informado'}`, 12, false, 'left', 1.5);
     cursorY += 20;
 
     // 2. Dados da Reclamante
@@ -3460,19 +3990,19 @@ export async function exportReportAsPdf(
     cursorY += 10;
     const claimantData = (typeof process.claimant_data === 'object' && process.claimant_data) ? process.claimant_data as any : {};
     const claimantName = claimantData.name || process.claimant_name || 'Não informado';
-    addText(`Nome Completo: ${claimantName}`, 12);
+    addText(`Nome Completo: ${claimantName}`, 12, false, 'left', 1.5);
     // Funções e Períodos Laborais (aba Laudo)
     const positions = Array.isArray(claimantData.positions) ? claimantData.positions : [];
-    addText("Funções e Períodos Laborais", 12);
+    addText("Funções e Períodos Laborais", 12, false, 'left', 1.5);
     if (!positions.length) {
-      addText("Nenhuma função adicionada.", 12);
+      addText("Nenhuma função adicionada.", 12, false, 'left', 1.5);
     } else {
       positions.forEach((p: any) => {
         const title = (p?.title || '').trim() || 'Não informado';
         const period = (p?.period || '').trim() || 'Não informado';
         const obs = (p?.obs || '').trim();
         const obsText = obs ? ` | Observações: ${obs}` : '';
-        addText(`• Função: ${title} | Período: ${period}${obsText}`, 12);
+        addText(`• Função: ${title} | Período: ${period}${obsText}`, 12, false, 'left', 1.5);
       });
     }
     cursorY += 20;
@@ -3569,7 +4099,7 @@ export async function exportReportAsPdf(
       if (iAddr) addText(`Local: ${String(iAddr)}${iCity ? `, ${String(iCity)}` : ''}`, 12);
       if (iDate) addText(`Data: ${fmtDate(String(iDate))}`, 12);
       if (iTime) addText(`Horário: ${fmtTime(String(iTime))}`, 12);
-      if (!iAddr && !iDate && !iTime) addText("Não informado", 12);
+      if (!iAddr && !iDate && !iTime) addText("Não informado", 12, false, 'left', 1.5);
     }
     cursorY += 20;
 
@@ -3619,12 +4149,12 @@ export async function exportReportAsPdf(
         const emissor = d?.issuer || d?.emissor;
         const data = d?.date || d?.data;
         const detalhes = [nome, tipo, emissor, data].filter(Boolean).join(" • ");
-        addText(`• ${detalhes}`, 12);
+        addText(`• ${detalhes}`, 12, false, 'left', 1.5);
       });
     } else if (typeof docs === 'string' && docs.trim()) {
-      addText(String(docs), 12);
+      addParagraphJustified(String(docs), 12);
     } else {
-      addText('Não informado', 12);
+      addText('Não informado', 12, false, 'left', 1.5);
     }
     cursorY += 20;
 
@@ -3646,7 +4176,7 @@ export async function exportReportAsPdf(
           : specialType === 'outra' ? 'Outra condição'
           : 'Usar tabela padrão';
         if (specialType !== 'none') {
-          addText(`Condição especial: ${typeLabel}.`, 12);
+          addText(`Condição especial: ${typeLabel}.`, 12, false, 'left', 1.5);
           addParagraphJustified(specialDesc || 'Não informado', 12);
         } else {
           // Tabela detalhada para condição padrão
@@ -3695,7 +4225,7 @@ export async function exportReportAsPdf(
         });
         drawCenteredTable(headers, rows, [0.35, 0.65]);
       } else {
-        addText('Não informado', 12);
+        addText('Não informado', 12, false, 'left', 1.5);
       }
     }
     cursorY += 20;
@@ -3711,7 +4241,7 @@ export async function exportReportAsPdf(
       if (txt) {
         addParagraphJustified(txt, 12);
       } else {
-        addText('Não informado', 12);
+        addText('Não informado', 12, false, 'left', 1.5);
       }
     }
     cursorY += 20;
@@ -3723,7 +4253,7 @@ export async function exportReportAsPdf(
       const photos: Array<{ id: string; type: 'url' | 'storage'; url?: string; file_path?: string; signed_url?: string; caption?: string }>
         = Array.isArray((process as any)?.report_config?.photo_register) ? ((process as any).report_config.photo_register as any[]) : [];
       if (!Array.isArray(photos) || photos.length === 0) {
-        addText('Nenhuma foto adicionada.', 12);
+        addText('Nenhuma foto adicionada.', 12, false, 'left', 1.5);
       } else {
         const gap = 14;
         const colW = Math.floor((contentWidth - gap) / 2);
@@ -3804,7 +4334,7 @@ export async function exportReportAsPdf(
       } else if (typeof discordances === 'string' && discordances.trim()) {
         addParagraphJustified(String(discordances).trim(), 12);
       } else {
-        addText('Não informado', 12);
+        addText('Não informado', 12, false, 'left', 1.5);
       }
     }
     cursorY += 20;
@@ -4396,7 +4926,7 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       }
       if (!hasNR15 && !hasNR16) {
         const baseText = includePericulosidade && !includeInsalubridade ? pericuText : insalubrity;
-        addText(String(baseText), 12);
+        addParagraphSmartJustified(String(baseText), 12);
       }
     }
     cursorY += 20;
@@ -4406,8 +4936,77 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       cursorY += 10;
       const insalubrityResults =
         (process as any).insalubrity_results || (process as any).insalubridade_resultados || "Não informado";
-      addText(fixGrammar(String(insalubrityResults)), 12);
-      cursorY += 20;
+      addAnnexResultsWithThemeBox(String(insalubrityResults), 12);
+      cursorY += 10;
+
+      try {
+        const imgs = Array.isArray((rcQ as any)?.item16_images) ? (rcQ as any).item16_images : [];
+        const legacyUrl = String((rcQ as any)?.item16_imageDataUrl || '').trim();
+        const legacyCaption = String((rcQ as any)?.item16_imageCaption || '').trim();
+        const list = (imgs.length ? imgs : (legacyUrl ? [{ dataUrl: legacyUrl, caption: legacyCaption }] : []))
+          .map((x: any) => ({ dataUrl: String(x?.dataUrl || '').trim(), caption: String(x?.caption || '').trim() }))
+          .filter((x: any) => x.dataUrl && x.dataUrl.length > 20);
+
+        if (list.length > 0) {
+          const gap = 14;
+          const colW = Math.floor((contentWidth - gap) / 2);
+          const maxW = Math.min(colW, 240);
+          let colIndex = 0;
+          let rowMaxH = 0;
+          let rowStartY = cursorY;
+
+          const renderCell = async (p: any, x: number) => {
+            let cellH = 0;
+            try {
+              const normalized = await normalizeDataUrlToPng(p.dataUrl);
+              const w = maxW;
+              const h = normalized.naturalWidth && normalized.naturalHeight
+                ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth))
+                : Math.round(w * 0.6);
+              const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+              if (rowStartY + h + 40 > pageHeight - reservedBottom) {
+                addPage();
+                rowStartY = cursorY;
+              }
+              doc.addImage(normalized.dataUrl, 'PNG', x, rowStartY, w, h);
+              cellH += h;
+              const caption = String(p.caption || '').trim();
+              if (caption) {
+                const lines = doc.splitTextToSize(caption, w);
+                let ty = rowStartY + h + 12;
+                doc.setFontSize(10);
+                doc.setFont('helvetica', 'normal');
+                lines.forEach((ln: string) => {
+                  doc.text(ln, x, ty);
+                  ty += 12;
+                  cellH += 12;
+                });
+              }
+            } catch {
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'normal');
+              doc.text('Imagem não disponível', x, rowStartY + 12);
+              cellH += 24;
+            }
+            rowMaxH = Math.max(rowMaxH, cellH + 24);
+          };
+
+          for (let i = 0; i < list.length; i++) {
+            if (colIndex === 0) {
+              rowMaxH = 0;
+              rowStartY = cursorY;
+            }
+            const x = marginLeft + colIndex * (maxW + gap);
+            await renderCell(list[i], x);
+            colIndex = (colIndex + 1) % 2;
+            if (colIndex === 0 || i === list.length - 1) {
+              cursorY = rowStartY + rowMaxH + 10;
+            }
+          }
+        }
+      } catch {}
+
+      cursorY += 10;
     }
 
     if (includePericulosidade) {
@@ -4437,8 +5036,77 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       cursorY += 10;
       const periculosityResults =
         (process as any).periculosity_results || (process as any).resultados_periculosidade || "Não informado";
-      addText(fixGrammar(String(periculosityResults)), 12);
-      cursorY += 20;
+      addParagraphSmartJustified(fixGrammar(String(periculosityResults)), 12);
+      cursorY += 10;
+
+      try {
+        const imgs = Array.isArray((rcQ as any)?.item19_images) ? (rcQ as any).item19_images : [];
+        const legacyUrl = String((rcQ as any)?.item19_imageDataUrl || '').trim();
+        const legacyCaption = String((rcQ as any)?.item19_imageCaption || '').trim();
+        const list = (imgs.length ? imgs : (legacyUrl ? [{ dataUrl: legacyUrl, caption: legacyCaption }] : []))
+          .map((x: any) => ({ dataUrl: String(x?.dataUrl || '').trim(), caption: String(x?.caption || '').trim() }))
+          .filter((x: any) => x.dataUrl && x.dataUrl.length > 20);
+
+        if (list.length > 0) {
+          const gap = 14;
+          const colW = Math.floor((contentWidth - gap) / 2);
+          const maxW = Math.min(colW, 240);
+          let colIndex = 0;
+          let rowMaxH = 0;
+          let rowStartY = cursorY;
+
+          const renderCell = async (p: any, x: number) => {
+            let cellH = 0;
+            try {
+              const normalized = await normalizeDataUrlToPng(p.dataUrl);
+              const w = maxW;
+              const h = normalized.naturalWidth && normalized.naturalHeight
+                ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth))
+                : Math.round(w * 0.6);
+              const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+              if (rowStartY + h + 40 > pageHeight - reservedBottom) {
+                addPage();
+                rowStartY = cursorY;
+              }
+              doc.addImage(normalized.dataUrl, 'PNG', x, rowStartY, w, h);
+              cellH += h;
+              const caption = String(p.caption || '').trim();
+              if (caption) {
+                const lines = doc.splitTextToSize(caption, w);
+                let ty = rowStartY + h + 12;
+                doc.setFontSize(10);
+                doc.setFont('helvetica', 'normal');
+                lines.forEach((ln: string) => {
+                  doc.text(ln, x, ty);
+                  ty += 12;
+                  cellH += 12;
+                });
+              }
+            } catch {
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'normal');
+              doc.text('Imagem não disponível', x, rowStartY + 12);
+              cellH += 24;
+            }
+            rowMaxH = Math.max(rowMaxH, cellH + 24);
+          };
+
+          for (let i = 0; i < list.length; i++) {
+            if (colIndex === 0) {
+              rowMaxH = 0;
+              rowStartY = cursorY;
+            }
+            const x = marginLeft + colIndex * (maxW + gap);
+            await renderCell(list[i], x);
+            colIndex = (colIndex + 1) % 2;
+            if (colIndex === 0 || i === list.length - 1) {
+              cursorY = rowStartY + rowMaxH + 10;
+            }
+          }
+        }
+      } catch {}
+
+      cursorY += 10;
     }
 
     // 20 - Quesitos da Perícia: imprimir somente se houver conteúdo
@@ -4518,6 +5186,21 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
     addText(`${professionalTitle}`, 12, false, 'center');
     addText(`${registrationNumber}`, 12, false, 'center');
     cursorY += 40;
+
+    const fillTocPageNumbers = () => {
+      const xRight = pageWidth - marginRight;
+      tocNumberSlots.forEach((slot) => {
+        const pageNumber = tocPages.get(slot.title);
+        if (!pageNumber) return;
+        doc.setPage(slot.pageIndex);
+        doc.setFontSize(slot.fontSize);
+        doc.setFont("helvetica", "normal");
+        const text = String(pageNumber);
+        const w = doc.getTextWidth(text);
+        doc.text(text, xRight - w, slot.y);
+      });
+    };
+    fillTocPageNumbers();
     
 
     // Salvar PDF

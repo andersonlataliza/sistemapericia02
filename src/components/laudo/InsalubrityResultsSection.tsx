@@ -2,7 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 interface InsalubrityResultsSectionProps {
@@ -14,13 +15,18 @@ interface InsalubrityResultsSectionProps {
   onApplyTemplate?: (t: any) => void;
   onCreateTemplate?: () => void;
   onManageTemplates?: () => void;
+  images?: { dataUrl: string; caption?: string }[];
+  onImagesChange?: (next: { dataUrl: string; caption?: string }[]) => void;
 }
 
-export default function InsalubrityResultsSection({ value, onChange, rowsInAnalysis, templates, onApplyTemplate, onCreateTemplate, onManageTemplates }: InsalubrityResultsSectionProps) {
+export default function InsalubrityResultsSection({ value, onChange, rowsInAnalysis, templates, onApplyTemplate, onCreateTemplate, onManageTemplates, images, onImagesChange }: InsalubrityResultsSectionProps) {
   const rows = rowsInAnalysis || [];
   const [byAnnex, setByAnnex] = useState<Record<number, string>>({});
   const [freeText, setFreeText] = useState<string>("");
   const [tplId, setTplId] = useState<string>("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const currentImages = useMemo(() => (Array.isArray(images) ? images : []).filter((x) => x && String((x as any).dataUrl || '').trim()), [images]);
   const availableTemplates = useMemo(() => {
     const list = Array.isArray(templates) ? templates : [];
     return list;
@@ -95,6 +101,42 @@ export default function InsalubrityResultsSection({ value, onChange, rowsInAnaly
       setFreeText(String(value || ""));
     }
   }, [rows.length, value]);
+
+  const buildImageDataUrl = async (file: File): Promise<string> => {
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" } as any);
+    const maxSide = 900;
+    const scale = Math.min(1, maxSide / Math.max(bmp.width || 1, bmp.height || 1));
+    const w = Math.max(1, Math.round((bmp.width || 1) * scale));
+    const h = Math.max(1, Math.round((bmp.height || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas não suportado");
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const outputType = file.type.includes("png") ? "image/png" : "image/jpeg";
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => {
+          if (!b) {
+            reject(new Error("Falha ao processar imagem"));
+            return;
+          }
+          resolve(b);
+        },
+        outputType,
+        outputType === "image/jpeg" ? 0.85 : undefined,
+      );
+    });
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    return dataUrl;
+  };
+
   return (
     <Card className="shadow-card">
       <CardHeader>
@@ -173,6 +215,80 @@ export default function InsalubrityResultsSection({ value, onChange, rowsInAnaly
                 </CardContent>
               </Card>
             ))}
+          </div>
+        )}
+        {!!onImagesChange && (
+          <div className="space-y-2">
+            <Label>Imagem (opcional)</Label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={imageLoading}
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []).filter(Boolean);
+                  if (!files.length) return;
+                  setImageLoading(true);
+                  try {
+                    const built: { dataUrl: string; caption?: string }[] = [];
+                    for (const f of files) {
+                      try {
+                        const dataUrl = await buildImageDataUrl(f);
+                        if (dataUrl) built.push({ dataUrl, caption: "" });
+                      } catch {}
+                    }
+                    const next = [...currentImages, ...built];
+                    onImagesChange(next);
+                  } finally {
+                    setImageLoading(false);
+                    try {
+                      if (imageInputRef.current) imageInputRef.current.value = "";
+                    } catch {}
+                  }
+                }}
+              />
+            </div>
+            {currentImages.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {currentImages.map((it, idx) => (
+                  <div key={`${idx}-${it.dataUrl.slice(0, 24)}`} className="border rounded p-2">
+                    <div className="aspect-video bg-muted rounded overflow-hidden">
+                      <img src={it.dataUrl} alt={`Imagem ${idx + 1} do item 16`} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      <Label>Legenda (opcional)</Label>
+                      <Input
+                        type="text"
+                        value={String(it.caption || "")}
+                        onChange={(e) => {
+                          const next = currentImages.map((x, i) => i === idx ? { ...x, caption: e.target.value } : x);
+                          onImagesChange(next);
+                        }}
+                        placeholder="Ex.: Figura 1 — Detalhe do agente insalubre"
+                      />
+                    </div>
+                    <div className="mt-2 flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const next = currentImages.filter((_, i) => i !== idx);
+                          onImagesChange(next);
+                          try {
+                            if (imageInputRef.current) imageInputRef.current.value = "";
+                          } catch {}
+                        }}
+                      >
+                        Remover
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

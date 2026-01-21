@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import { Scale, AlertCircle, CheckCircle } from "lucide-react";
 import { cleanCPF, formatCPF, validateCPFWithMessage } from "@/utils/cpfUtils";
 
 export default function AuthForm() {
+  const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,6 +31,17 @@ export default function AuthForm() {
     cpf?: boolean;
   }>({});
   const { toast } = useToast();
+
+  const redirectTarget = (() => {
+    try {
+      const raw = new URLSearchParams(window.location.search).get("redirect");
+      if (!raw) return "";
+      const decoded = decodeURIComponent(raw);
+      return decoded.startsWith("/") ? decoded : "";
+    } catch {
+      return "";
+    }
+  })();
 
   // Validações em tempo real
   useEffect(() => {
@@ -118,6 +131,8 @@ export default function AuthForm() {
           title: "Login realizado com sucesso",
           description: "Bem-vindo de volta!",
         });
+
+        navigate(redirectTarget || "/dashboard", { replace: true });
       } else {
         const cpfValidation = validateCPFWithMessage(cpf);
         if (!cpfValidation.isValid) {
