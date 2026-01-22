@@ -288,7 +288,7 @@ export default function Processes() {
             processes!inner(*)
           )
         `)
-        .eq("linked_user_cpf", user.user_metadata?.cpf || "")
+        .eq("auth_user_id", user.id)
         .eq("status", "active");
 
       if (linkedError && linkedError.code !== 'PGRST116') { // PGRST116 = no rows returned
@@ -299,13 +299,21 @@ export default function Processes() {
       let allProcesses = ownProcesses || [];
       
       if (linkedAccess && linkedAccess.length > 0) {
-        const linkedProcesses = linkedAccess.flatMap(access => 
-          access.process_access?.map(pa => ({
-            ...(pa.processes as Tables<'processes'>),
-            _is_linked: true, // Flag para identificar processos vinculados
-            _linked_permissions: access.permissions
-          })) || []
-        );
+        const linkedProcesses = linkedAccess
+          .flatMap((access) =>
+            (access.process_access || [])
+              .map((pa) => {
+                const proc = pa.processes as Tables<'processes'>;
+                if (!proc || proc.user_id !== access.owner_user_id) return null;
+                return {
+                  ...proc,
+                  _is_linked: true,
+                  _linked_permissions: access.permissions,
+                };
+              })
+              .filter(Boolean),
+          )
+          .filter(Boolean) as any[];
         
         // Evitar duplicatas (caso o usuário seja dono e também tenha acesso vinculado)
         const ownProcessIds = new Set(allProcesses.map(p => p.id));

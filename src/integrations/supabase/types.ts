@@ -90,6 +90,7 @@ export type Database = {
       }
       linked_users: {
         Row: {
+          auth_user_id: string | null
           created_at: string | null
           id: string
           linked_user_cpf: string
@@ -102,6 +103,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          auth_user_id?: string | null
           created_at?: string | null
           id?: string
           linked_user_cpf: string
@@ -114,6 +116,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          auth_user_id?: string | null
           created_at?: string | null
           id?: string
           linked_user_cpf?: string
@@ -469,6 +472,7 @@ export type Database = {
           id: string
           is_blocked: boolean
           email: string | null
+          max_linked_users: number | null
           professional_title: string | null
           registration_number: string | null
           phone: string | null
@@ -484,6 +488,7 @@ export type Database = {
           id: string
           is_blocked?: boolean
           email?: string | null
+          max_linked_users?: number | null
           professional_title?: string | null
           registration_number?: string | null
           phone?: string | null
@@ -499,6 +504,7 @@ export type Database = {
           id?: string
           is_blocked?: boolean
           email?: string | null
+          max_linked_users?: number | null
           professional_title?: string | null
           registration_number?: string | null
           phone?: string | null

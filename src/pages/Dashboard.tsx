@@ -41,6 +41,7 @@ export default function Dashboard() {
   });
 
 const startEdit = (p: Process) => {
+  if (p?._is_linked) return;
   setEditingId(p.id);
   setEditDraft({
     process_number: p.process_number,
@@ -56,6 +57,9 @@ const cancelEdit = () => {
 
 const saveEdit = async () => {
   if (!editingId) return;
+
+  const current = processes.find((p) => p.id === editingId);
+  if (current?._is_linked) return;
 
   if (!editDraft.process_number.trim() || !editDraft.claimant_name.trim() || !editDraft.defendant_name.trim()) {
     toast({
@@ -126,23 +130,19 @@ const saveEdit = async () => {
 
       if (ownError) throw ownError;
 
-      // Buscar processos acessíveis através de usuários vinculados (somente se CPF estiver disponível)
-      const userCpf = (user.user_metadata && typeof user.user_metadata.cpf === 'string') ? user.user_metadata.cpf : null;
-      const { data: linkedAccess, error: linkedError } = userCpf
-        ? await supabase
-            .from("linked_users")
-            .select(`
-              id,
-              owner_user_id,
-              permissions,
-              process_access!inner(
-                process_id,
-                processes!inner(*)
-              )
-            `)
-            .eq("linked_user_cpf", userCpf)
-            .eq("status", "active")
-        : { data: [], error: null } as any;
+      const { data: linkedAccess, error: linkedError } = await supabase
+        .from("linked_users")
+        .select(`
+          id,
+          owner_user_id,
+          permissions,
+          process_access!inner(
+            process_id,
+            processes!inner(*)
+          )
+        `)
+        .eq("auth_user_id", user.id)
+        .eq("status", "active");
 
       if (linkedError && linkedError.code !== 'PGRST116') {
         console.warn("Erro ao buscar processos vinculados:", linkedError);
@@ -152,13 +152,21 @@ const saveEdit = async () => {
       let allProcesses = ownProcesses || [];
       
       if (linkedAccess && linkedAccess.length > 0) {
-        const linkedProcesses = linkedAccess.flatMap(access => 
-          access.process_access?.map(pa => ({
-            ...(pa.processes as any),
-            _is_linked: true,
-            _linked_permissions: access.permissions
-          })) || []
-        );
+        const linkedProcesses = linkedAccess
+          .flatMap((access) =>
+            (access.process_access || [])
+              .map((pa) => {
+                const proc = pa.processes as Tables<'processes'>;
+                if (!proc || proc.user_id !== access.owner_user_id) return null;
+                return {
+                  ...proc,
+                  _is_linked: true,
+                  _linked_permissions: access.permissions,
+                };
+              })
+              .filter(Boolean),
+          )
+          .filter(Boolean) as any[];
         
         // Evitar duplicatas e limitar a 5 processos no total
         const ownProcessIds = new Set(allProcesses.map(p => p.id));
@@ -352,13 +360,15 @@ const saveEdit = async () => {
                             <Eye className="w-4 h-4 mr-2" />
                             Ver
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => startEdit(process)}
-                          >
-                            Editar
-                          </Button>
+                          {!((process as any)._is_linked) && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => startEdit(process)}
+                            >
+                              Editar
+                            </Button>
+                          )}
                         </div>
                       </>
                     )}

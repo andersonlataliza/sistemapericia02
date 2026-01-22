@@ -23,6 +23,7 @@ export default function Navbar() {
   const { toast } = useToast();
   const [userEmail, setUserEmail] = useState<string>("");
   const [adminEnabled, setAdminEnabled] = useState(false);
+  const [isLinked, setIsLinked] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -33,6 +34,7 @@ export default function Navbar() {
         if (session?.user?.email) {
           setUserEmail(session.user.email);
         }
+        setIsLinked(Boolean((session?.user as any)?.user_metadata?.is_linked));
 
         const { data, error } = await supabase.rpc("is_admin");
         if (error) {
@@ -86,9 +88,11 @@ export default function Navbar() {
               <Link to="/material-consulta">
                 <Button variant="ghost">Material de Consulta</Button>
               </Link>
-              <Link to="/usuarios-vinculados">
-                <Button variant="ghost">Usuários Vinculados</Button>
-              </Link>
+              {!isLinked && (
+                <Link to="/usuarios-vinculados">
+                  <Button variant="ghost">Usuários Vinculados</Button>
+                </Link>
+              )}
               {(adminEnabled || isAdmin(userEmail)) && (
                 <Link to="/pagamento">
                   <Button variant="ghost">Pagamento</Button>
@@ -122,7 +126,9 @@ export default function Navbar() {
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/processos")}>Processos</Button>
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/configuracao-relatorio")}>Configuração do Relatório</Button>
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/material-consulta")}>Material de Consulta</Button>
-                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/usuarios-vinculados")}>Usuários Vinculados</Button>
+                    {!isLinked && (
+                      <Button variant="ghost" className="justify-start" onClick={() => navigate("/usuarios-vinculados")}>Usuários Vinculados</Button>
+                    )}
                     {(adminEnabled || isAdmin(userEmail)) && (
                       <Button variant="ghost" className="justify-start" onClick={() => navigate("/pagamento")}>Pagamento</Button>
                     )}

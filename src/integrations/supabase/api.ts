@@ -126,6 +126,7 @@ export interface AdminCreateUserParams {
   makeAdmin?: boolean;
   blocked?: boolean;
   blockedReason?: string;
+  maxLinkedUsers?: number;
 }
 
 export interface AdminCreateUserResponse {
@@ -140,6 +141,18 @@ export interface AdminDeleteUserParams {
 
 export interface AdminDeleteUserResponse {
   success: boolean;
+  error?: string;
+}
+
+export interface OwnerCreateLinkedUserAccountParams {
+  linkedUserId: string;
+  email: string;
+  password: string;
+}
+
+export interface OwnerCreateLinkedUserAccountResponse {
+  success: boolean;
+  user?: { id: string; email: string };
   error?: string;
 }
 
@@ -778,6 +791,35 @@ export class SupabaseAPI {
     }
 
     return data as AdminDeleteUserResponse;
+  }
+
+  static async ownerCreateLinkedUserAccount(
+    params: OwnerCreateLinkedUserAccountParams,
+  ): Promise<OwnerCreateLinkedUserAccountResponse> {
+    const headers = await this.authHeaders();
+    const { data, error } = await supabase.functions.invoke('owner-create-linked-user-account', {
+      method: 'POST',
+      body: params,
+      headers,
+    });
+
+    if (error) {
+      let errorMsg = error.message;
+      if (error instanceof Error && 'context' in error) {
+        try {
+          const ctx = (error as any).context;
+          if (ctx && typeof ctx.json === 'function') {
+            const body = await ctx.json();
+            if (body && typeof body.error === 'string' && body.error.trim()) {
+              errorMsg = body.error;
+            }
+          }
+        } catch {}
+      }
+      throw new Error(errorMsg || 'Falha ao criar conta do usuário vinculado');
+    }
+
+    return data as OwnerCreateLinkedUserAccountResponse;
   }
 }
 

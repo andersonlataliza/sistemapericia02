@@ -16,6 +16,7 @@ import type { Tables, Json } from "@/integrations/supabase/types";
 import { validateCPFWithMessage, formatCPF, cleanCPF } from "@/utils/cpfUtils";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { SupabaseAPI } from "@/integrations/supabase/api";
 
 interface Permissions {
   view_processes: boolean;
@@ -56,6 +57,7 @@ export default function LinkedUsers() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
+  const [maxLinkedUsers, setMaxLinkedUsers] = useState<number | null>(null);
   
   const [linkedUsers, setLinkedUsers] = useState<LinkedUser[]>([]);
   const [processes, setProcesses] = useState<any[]>([]);
@@ -66,6 +68,12 @@ export default function LinkedUsers() {
   const [selectedLinkedUser, setSelectedLinkedUser] = useState<LinkedUser | null>(null);
   const [processAccess, setProcessAccess] = useState<ProcessAccess[]>([]);
   const [selectedProcesses, setSelectedProcesses] = useState<string[]>([]);
+
+  const [createAccountOpen, setCreateAccountOpen] = useState(false);
+  const [createAccountTarget, setCreateAccountTarget] = useState<LinkedUser | null>(null);
+  const [createAccountEmail, setCreateAccountEmail] = useState("");
+  const [createAccountPassword, setCreateAccountPassword] = useState("");
+  const [createAccountLoading, setCreateAccountLoading] = useState(false);
   
   const [formData, setFormData] = useState<FormData>({
     cpf: '',
@@ -152,6 +160,17 @@ export default function LinkedUsers() {
         }
         setUser(authUser);
 
+        try {
+          const { data: profileRow } = await supabase
+            .from('profiles')
+            .select('max_linked_users')
+            .eq('id', authUser.id)
+            .maybeSingle();
+          setMaxLinkedUsers(typeof profileRow?.max_linked_users === 'number' ? profileRow.max_linked_users : null);
+        } catch {
+          setMaxLinkedUsers(null);
+        }
+
         await Promise.all([
           loadLinkedUsers(authUser.id),
           loadProcesses(authUser.id)
@@ -170,6 +189,51 @@ export default function LinkedUsers() {
 
     initializeData();
   }, [loadLinkedUsers, loadProcesses, navigate, toast]);
+
+  const openCreateAccount = (linkedUser: LinkedUser) => {
+    setCreateAccountTarget(linkedUser);
+    setCreateAccountEmail(linkedUser.linked_user_email || "");
+    setCreateAccountPassword("");
+    setCreateAccountOpen(true);
+  };
+
+  const createAccount = async () => {
+    if (!createAccountTarget) return;
+    const email = createAccountEmail.trim().toLowerCase();
+    const password = createAccountPassword;
+
+    if (!email || !email.includes('@')) {
+      toast({ title: 'Email inválido', description: 'Informe um email válido.', variant: 'destructive' });
+      return;
+    }
+    if (!password || password.length < 6) {
+      toast({ title: 'Senha inválida', description: 'Senha deve ter pelo menos 6 caracteres.', variant: 'destructive' });
+      return;
+    }
+
+    setCreateAccountLoading(true);
+    try {
+      const res = await SupabaseAPI.ownerCreateLinkedUserAccount({
+        linkedUserId: createAccountTarget.id,
+        email,
+        password,
+      });
+
+      if (!res?.success) {
+        toast({ title: 'Erro', description: res?.error || 'Falha ao criar conta', variant: 'destructive' });
+        return;
+      }
+
+      toast({ title: 'Acesso criado', description: 'Login e senha foram definidos.' });
+      setCreateAccountOpen(false);
+      setCreateAccountTarget(null);
+      await loadLinkedUsers();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error?.message || 'Falha ao criar conta', variant: 'destructive' });
+    } finally {
+      setCreateAccountLoading(false);
+    }
+  };
 
   const loadProcessAccess = async (linkedUserId: string) => {
     try {
@@ -255,6 +319,14 @@ export default function LinkedUsers() {
           description: "Usuário vinculado atualizado com sucesso!",
         });
       } else {
+        if (typeof maxLinkedUsers === 'number' && linkedUsers.length >= maxLinkedUsers) {
+          toast({
+            title: 'Limite atingido',
+            description: `Você atingiu o limite de ${maxLinkedUsers} usuário(s) vinculado(s).`,
+            variant: 'destructive',
+          });
+          return;
+        }
         if (!currentUser) {
           toast({
             title: "Erro",
@@ -295,6 +367,16 @@ export default function LinkedUsers() {
     } catch (error: any) {
       console.error('Error saving linked user:', error);
       
+      const msg = String(error?.message || '');
+      if (msg.includes('limite_de_usuarios_vinculados_excedido')) {
+        toast({
+          title: 'Limite atingido',
+          description: 'Você atingiu o limite de usuários vinculados definido pelo administrador.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       if (error.code === '23505') {
         toast({
           title: "CPF já cadastrado",
@@ -474,11 +556,20 @@ export default function LinkedUsers() {
               Gerencie usuários que podem visualizar seus processos através do CPF
             </p>
           </div>
-          <Button onClick={() => setIsDialogOpen(true)}>
+          <Button
+            onClick={() => setIsDialogOpen(true)}
+            disabled={typeof maxLinkedUsers === 'number' && linkedUsers.length >= maxLinkedUsers}
+          >
             <UserPlus className="h-4 w-4 mr-2" />
             Novo Usuário
           </Button>
         </div>
+
+        {typeof maxLinkedUsers === 'number' && linkedUsers.length >= maxLinkedUsers && (
+          <div className="mb-6 text-sm text-muted-foreground">
+            Limite de {maxLinkedUsers} usuário(s) vinculado(s) atingido.
+          </div>
+        )}
 
         <Card>
           <CardHeader>
@@ -486,8 +577,8 @@ export default function LinkedUsers() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <div>1) Aqui você cadastra o CPF e define permissões de visualização.</div>
-            <div>2) O usuário vinculado cria o próprio login e senha na tela inicial do sistema.</div>
-            <div>3) Ele deve usar o mesmo CPF no cadastro para que os processos apareçam.</div>
+            <div>2) Crie o login e a senha do usuário vinculado e compartilhe com ele.</div>
+            <div>3) Em “Acessos”, selecione quais processos ele poderá visualizar.</div>
           </CardContent>
         </Card>
 
@@ -535,6 +626,14 @@ export default function LinkedUsers() {
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => openCreateAccount(linkedUser)}
+                          disabled={Boolean((linkedUser as any).auth_user_id)}
+                        >
+                          Login
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleEdit(linkedUser)}
                         >
                           <Edit className="h-4 w-4" />
@@ -555,6 +654,12 @@ export default function LinkedUsers() {
                         <Label className="text-sm font-medium">Email</Label>
                         <p className="text-sm text-muted-foreground">
                           {linkedUser.linked_user_email || 'Não informado'}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">Acesso</Label>
+                        <p className="text-sm text-muted-foreground">
+                          {(linkedUser as any).auth_user_id ? 'Criado' : 'Pendente'}
                         </p>
                       </div>
                       <div>
@@ -587,6 +692,49 @@ export default function LinkedUsers() {
             </div>
           )}
         </div>
+
+        <Dialog open={createAccountOpen} onOpenChange={setCreateAccountOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Criar login do usuário vinculado</DialogTitle>
+              <DialogDescription>
+                {createAccountTarget?.linked_user_name || ''}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="linked-login-email">Email</Label>
+                <Input
+                  id="linked-login-email"
+                  value={createAccountEmail}
+                  onChange={(e) => setCreateAccountEmail(e.target.value)}
+                  placeholder="usuario@dominio.com"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="linked-login-password">Senha</Label>
+                <Input
+                  id="linked-login-password"
+                  type="password"
+                  value={createAccountPassword}
+                  onChange={(e) => setCreateAccountPassword(e.target.value)}
+                  placeholder="mínimo 6 caracteres"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateAccountOpen(false)} disabled={createAccountLoading}>
+                Cancelar
+              </Button>
+              <Button type="button" onClick={createAccount} disabled={createAccountLoading}>
+                {createAccountLoading ? 'Criando...' : 'Criar acesso'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Dialog para cadastro/edição */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -650,7 +798,7 @@ export default function LinkedUsers() {
                 </div>
 
                 <div className="text-sm text-muted-foreground">
-                  Login e senha não são criados nesta tela. O usuário vinculado deve criar a própria conta na tela inicial do sistema e informar o mesmo CPF.
+                  Login e senha são criados pelo dono da conta usando o botão "Login" na lista de usuários vinculados.
                 </div>
               </div>
 

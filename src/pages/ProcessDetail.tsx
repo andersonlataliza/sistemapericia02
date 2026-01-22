@@ -212,6 +212,14 @@ export default function ProcessDetail() {
     try {
       const session = await validateAndRecoverSession();
       if (!session || !process) return;
+      if ((process as any)._is_linked) {
+        toast({
+          title: "Somente visualização",
+          description: "Você não tem permissão para editar este processo.",
+          variant: "destructive",
+        });
+        return;
+      }
       const rc = safeParseJson(process.report_config, {});
       const mergedRc = { ...rc } as any;
       if (Array.isArray(nextTemplates)) {
@@ -264,6 +272,14 @@ export default function ProcessDetail() {
     try {
       const session = await validateAndRecoverSession();
       if (!session || !process) return;
+      if ((process as any)._is_linked) {
+        toast({
+          title: "Somente visualização",
+          description: "Você não tem permissão para editar este processo.",
+          variant: "destructive",
+        });
+        return;
+      }
       const rc = safeParseJson(process.report_config, {});
       const mergedRc = { ...rc } as any;
       if (Array.isArray(nextTemplates)) {
@@ -462,6 +478,14 @@ export default function ProcessDetail() {
 
   const sendScheduleEmail = useCallback(async (recipients: Array<{ role: string; email: string }>) => {
     if (!process?.id) return;
+    if ((process as any)._is_linked) {
+      toast({
+        title: "Somente visualização",
+        description: "Você não tem permissão para enviar e-mails neste processo.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const subject = String(scheduleEmailSubject || "").trim();
     const body = String(scheduleEmailBody || "").trim();
@@ -523,6 +547,30 @@ export default function ProcessDetail() {
       console.log(`[DEBUG] Dados brutos do banco:`, data);
       console.log(`[DEBUG] initial_data do banco:`, data.initial_data);
       console.log(`[DEBUG] report_config do banco:`, data.report_config);
+
+      const authUser = await getAuthenticatedUser();
+
+      let isLinked = false;
+      let linkedPermissions: any = null;
+      if (authUser && authUser.id !== data.user_id) {
+        try {
+          const { data: accessRow, error: accessError } = await (supabase as any)
+            .from("process_access")
+            .select("linked_users!inner(permissions, status, auth_user_id)")
+            .eq("process_id", id)
+            .eq("linked_users.auth_user_id", authUser.id)
+            .eq("linked_users.status", "active")
+            .maybeSingle();
+
+          if (!accessError && accessRow?.linked_users) {
+            isLinked = true;
+            linkedPermissions = accessRow.linked_users.permissions;
+          }
+        } catch {
+          isLinked = false;
+          linkedPermissions = null;
+        }
+      }
       
       // Convert Json types to proper JavaScript types
       const processData = {
@@ -534,6 +582,8 @@ export default function ProcessDetail() {
         attendees: safeParseArray(data.attendees),
         epis: safeParseArray(data.epis),
         workplace_characteristics: safeParseJson(data.workplace_characteristics),
+        _is_linked: isLinked,
+        _linked_permissions: linkedPermissions,
         report_config: safeParseJson(data.report_config) || {
           header: {
             peritoName: "PERITO JUDICIAL",
@@ -698,6 +748,7 @@ export default function ProcessDetail() {
   // (evita sobrescrever edições manuais feitas na seção 2).
   const prevClaimantNameRef = useRef<string | null>(null);
   useEffect(() => {
+    if ((process as any)?._is_linked) return;
     const prev = prevClaimantNameRef.current;
     const current = process?.claimant_name || "";
     const processId = process?.id;
@@ -756,6 +807,15 @@ export default function ProcessDetail() {
 
   const handleSave = async () => {
     if (!process) return;
+
+    if ((process as any)._is_linked) {
+      toast({
+        title: "Somente visualização",
+        description: "Você não tem permissão para editar este processo.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Garante sessão válida antes de qualquer operação de escrita
     const session = await validateAndRecoverSession();
@@ -929,6 +989,16 @@ export default function ProcessDetail() {
 
   const saveProcessMeta = async () => {
     if (!process) return;
+
+    if ((process as any)._is_linked) {
+      toast({
+        title: "Somente visualização",
+        description: "Você não tem permissão para editar este processo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       console.log(`[DEBUG] Salvando metadados do processo:`, process);
@@ -1042,6 +1112,7 @@ export default function ProcessDetail() {
 
   const updateProcess = (field: keyof Process, value: any) => {
     if (process) {
+      if ((process as any)._is_linked) return;
       console.log(`[DEBUG] Atualizando campo ${field}:`, value);
       if (field === 'report_config') {
         try {
@@ -1060,6 +1131,7 @@ export default function ProcessDetail() {
 
   useEffect(() => {
     if (!process) return;
+    if ((process as any)._is_linked) return;
     const rcKey = JSON.stringify(process.report_config || {});
     const timer = setTimeout(async () => {
       try {
@@ -1079,6 +1151,7 @@ export default function ProcessDetail() {
   useEffect(() => {
     // Salva apenas quando houver processo carregado e mudança nesses campos
     if (!process) return;
+    if ((process as any)._is_linked) return;
     const timer = setTimeout(async () => {
       // Evita salvar se nada foi modificado
       const hasChanges = typeof process.epcs === 'string' || typeof process.collective_protection === 'string';
@@ -1209,6 +1282,14 @@ export default function ProcessDetail() {
 
   const handleGenerateReport = async (reportType: 'insalubridade' | 'periculosidade' | 'completo') => {
     if (!process?.id) return;
+    if ((process as any)._is_linked) {
+      toast({
+        title: "Somente visualização",
+        description: "Você não tem permissão para exportar/gerar relatórios neste processo.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await handleSave();
 
@@ -1582,6 +1663,14 @@ export default function ProcessDetail() {
 
   const handleExportDocx = async () => {
     if (!process?.id) return;
+    if ((process as any)._is_linked) {
+      toast({
+        title: "Somente visualização",
+        description: "Você não tem permissão para exportar/gerar relatórios neste processo.",
+        variant: "destructive",
+      });
+      return;
+    }
     await handleSave();
     // Aviso: imagem de cabeçalho ausente (prossegue mesmo assim)
     if (!hasHeaderImage()) {
@@ -1656,6 +1745,14 @@ export default function ProcessDetail() {
 
   const handleExportPdf = async () => {
     if (!process?.id) return;
+    if ((process as any)._is_linked) {
+      toast({
+        title: "Somente visualização",
+        description: "Você não tem permissão para exportar/gerar relatórios neste processo.",
+        variant: "destructive",
+      });
+      return;
+    }
     await handleSave();
     // Aviso: imagem de cabeçalho ausente (prossegue mesmo assim)
     if (!hasHeaderImage()) {
@@ -1741,14 +1838,38 @@ export default function ProcessDetail() {
     return null;
   }
 
+  const isReadOnly = Boolean((process as any)._is_linked);
+  const rawLinkedPermissions = ((process as any)._linked_permissions || {}) as any;
+  const linkedPermissions = {
+    view_processes: Boolean(rawLinkedPermissions?.view_processes ?? true),
+    view_documents: Boolean(rawLinkedPermissions?.view_documents ?? false),
+    view_reports: Boolean(rawLinkedPermissions?.view_reports ?? false),
+    view_payment: Boolean(rawLinkedPermissions?.view_payment ?? false),
+  };
+
+  const canViewProcesses = !isReadOnly || linkedPermissions.view_processes;
+  const canViewDocuments = !isReadOnly || linkedPermissions.view_documents;
+  const canViewReports = !isReadOnly || linkedPermissions.view_reports;
+
+  const canViewTab = (tab: string) => {
+    if (!isReadOnly) return true;
+    if (tab === "documentos") return canViewDocuments;
+    if (tab === "relatorios") return canViewReports;
+    return canViewProcesses;
+  };
+
+  const tabOrder = ["processo", "agendamento", "laudo", "laudo-automatico", "relatorios", "agentes", "documentos"];
+  const visibleTabs = tabOrder.filter(canViewTab);
+
   const defaultTab = (() => {
     try {
       const raw = new URLSearchParams(window.location.search).get("tab");
       const v = String(raw || "").trim();
-      const allowed = new Set(["processo", "agendamento", "laudo", "laudo-automatico", "relatorios", "agentes", "documentos"]);
-      return allowed.has(v) ? v : "laudo";
+      if (v && visibleTabs.includes(v)) return v;
+      if (visibleTabs.includes("laudo")) return "laudo";
+      return visibleTabs[0] || "laudo";
     } catch {
-      return "laudo";
+      return visibleTabs[0] || "laudo";
     }
   })();
 
@@ -1817,17 +1938,31 @@ export default function ProcessDetail() {
           </Card>
         )}
 
-        <Tabs defaultValue={defaultTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7">
-             <TabsTrigger value="processo">Processo</TabsTrigger>
-             <TabsTrigger value="agendamento">Agendamento</TabsTrigger>
-             <TabsTrigger value="laudo">Laudo</TabsTrigger>
-             <TabsTrigger value="laudo-automatico">Progresso do Laudo</TabsTrigger>
-             <TabsTrigger value="relatorios">Relatórios</TabsTrigger>
-             <TabsTrigger value="agentes">Agentes de Risco</TabsTrigger>
-             <TabsTrigger value="documentos">Documentos</TabsTrigger>
-           </TabsList>
+        {visibleTabs.length === 0 ? (
+          <Card className="shadow-card">
+            <CardHeader>
+              <CardTitle>Acesso restrito</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">Nenhuma permissão foi atribuída para este processo.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Tabs defaultValue={defaultTab} className="space-y-6">
+            <TabsList
+              className="grid w-full"
+              style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
+            >
+              {visibleTabs.includes("processo") && <TabsTrigger value="processo">Processo</TabsTrigger>}
+              {visibleTabs.includes("agendamento") && <TabsTrigger value="agendamento">Agendamento</TabsTrigger>}
+              {visibleTabs.includes("laudo") && <TabsTrigger value="laudo">Laudo</TabsTrigger>}
+              {visibleTabs.includes("laudo-automatico") && <TabsTrigger value="laudo-automatico">Progresso do Laudo</TabsTrigger>}
+              {visibleTabs.includes("relatorios") && <TabsTrigger value="relatorios">Relatórios</TabsTrigger>}
+              {visibleTabs.includes("agentes") && <TabsTrigger value="agentes">Agentes de Risco</TabsTrigger>}
+              {visibleTabs.includes("documentos") && <TabsTrigger value="documentos">Documentos</TabsTrigger>}
+            </TabsList>
 
+          {visibleTabs.includes("processo") && (
           <TabsContent value="processo" className="space-y-6">
             <Card className="shadow-card">
               <CardHeader>
@@ -1938,7 +2073,7 @@ export default function ProcessDetail() {
                   );
                 })()}
                 <div className="flex justify-end">
-                  <Button onClick={saveProcessMeta} disabled={saving}>
+                  <Button onClick={saveProcessMeta} disabled={saving || isReadOnly}>
                     <Save className="w-4 h-4 mr-2" />
                     {saving ? "Salvando..." : "Salvar Dados"}
                   </Button>
@@ -1946,7 +2081,9 @@ export default function ProcessDetail() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
+           {visibleTabs.includes("agendamento") && (
            <TabsContent value="agendamento" className="space-y-6">
              <Card className="shadow-card">
                <CardHeader>
@@ -2166,13 +2303,14 @@ export default function ProcessDetail() {
                   <Button type="button" variant="outline" onClick={() => refreshScheduleEmailReceipts(process?.id)}>
                     Atualizar status
                   </Button>
-                  <Button type="button" variant="secondary" onClick={() => sendScheduleEmail([{ role: "claimant", email: scheduleClaimantEmail }])}>
+                  <Button disabled={isReadOnly} type="button" variant="secondary" onClick={() => sendScheduleEmail([{ role: "claimant", email: scheduleClaimantEmail }])}>
                     Enviar para reclamante
                   </Button>
-                  <Button type="button" variant="secondary" onClick={() => sendScheduleEmail([{ role: "defendant", email: scheduleDefendantEmail }])}>
+                  <Button disabled={isReadOnly} type="button" variant="secondary" onClick={() => sendScheduleEmail([{ role: "defendant", email: scheduleDefendantEmail }])}>
                     Enviar para reclamada
                   </Button>
                   <Button
+                    disabled={isReadOnly}
                     type="button"
                     onClick={() =>
                       sendScheduleEmail([
@@ -2252,15 +2390,17 @@ export default function ProcessDetail() {
              </div>
 
              <div className="flex justify-end mt-4">
-               <Button onClick={saveProcessMeta} disabled={saving}>
+               <Button onClick={saveProcessMeta} disabled={saving || isReadOnly}>
                  {saving ? "Salvando..." : "Salvar Agendamento"}
                </Button>
              </div>
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
 
+          {visibleTabs.includes("laudo") && (
           <TabsContent value="laudo">
             <div className="space-y-6">
               <div className="flex justify-between gap-2 flex-wrap sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b py-2">
@@ -2277,6 +2417,7 @@ export default function ProcessDetail() {
                         return getEffectiveReportType();
                       })()}
                       onValueChange={(v) => {
+                        if (isReadOnly) return;
                         const rc = safeParseJson(process.report_config, {}) as any;
                         const nextRc = { ...rc, flags: { ...(rc?.flags || {}), reportType: v } };
                         updateProcess("report_config" as any, nextRc);
@@ -2292,14 +2433,14 @@ export default function ProcessDetail() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={handleSave} disabled={saving}>
+                  <Button onClick={handleSave} disabled={saving || isReadOnly}>
                     {saving ? "Salvando..." : "Salvar Laudo"}
                   </Button>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
-                          <Button variant="outline" onClick={handleExportDocx} disabled={!process?.id || reportLoading}>
+                          <Button variant="outline" onClick={handleExportDocx} disabled={!process?.id || reportLoading || isReadOnly}>
                             <FileDown className="w-4 h-4 mr-2" /> Exportar DOCX
                           </Button>
                         </span>
@@ -2313,7 +2454,7 @@ export default function ProcessDetail() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
-                          <Button variant="outline" onClick={handleExportPdf} disabled={!process?.id || reportLoading}>
+                          <Button variant="outline" onClick={handleExportPdf} disabled={!process?.id || reportLoading || isReadOnly}>
                             <FileDown className="w-4 h-4 mr-2" /> Exportar PDF
                           </Button>
                         </span>
@@ -2985,13 +3126,15 @@ export default function ProcessDetail() {
 
               <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t py-2">
                 <div className="flex justify-end gap-2">
-                  <Button onClick={handleSave} disabled={saving}>
+                  <Button onClick={handleSave} disabled={saving || isReadOnly}>
                     {saving ? "Salvando..." : "Salvar Laudo"}
                   </Button>
                 </div>
               </div>
             </div>
           </TabsContent>
+          )}
+          {visibleTabs.includes("laudo-automatico") && (
           <TabsContent value="laudo-automatico" className="space-y-6">
             <Card className="shadow-card">
               <CardHeader>
@@ -3168,17 +3311,19 @@ export default function ProcessDetail() {
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
-                  <Button variant="outline" onClick={async () => {
+                  <Button disabled={isReadOnly} variant="outline" onClick={async () => {
                     await handleExportDocx();
                   }}>Baixar prévia DOCX</Button>
-                  <Button onClick={async () => {
+                  <Button disabled={isReadOnly} onClick={async () => {
                     await handleExportPdf();
                   }}>Baixar prévia PDF</Button>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
+          {visibleTabs.includes("relatorios") && (
           <TabsContent value="relatorios" className="space-y-6">
             <Card className="shadow-card">
               <CardHeader>
@@ -3239,7 +3384,7 @@ export default function ProcessDetail() {
                       </p>
                       <Button 
                         onClick={() => handleGenerateReport('completo')}
-                        disabled={reportLoading}
+                        disabled={reportLoading || isReadOnly}
                         className="w-full"
                       >
                         {reportLoading ? "Gerando..." : "Gerar Relatório"}
@@ -3263,35 +3408,39 @@ export default function ProcessDetail() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
+           {visibleTabs.includes("documentos") && (
            <TabsContent value="documentos" className="space-y-6">
-             <FileUpload
-               bucketName="process-documents"
-               processId={process.id}
-               acceptedFileTypes={['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/jpg']}
-               maxFileSize={50 * 1024 * 1024} // 50MB
-               multiple={true}
-               enableTextExtraction={true}
-               onUploadComplete={(_, fileName) => {
-                 toast({
-                   title: 'Upload concluído',
-                   description: `Arquivo "${fileName}" enviado com sucesso.`,
-                 });
-                 // Refresh document list
-                 window.location.reload();
-               }}
-               onUploadError={(error) => {
-                 toast({
-                   title: 'Erro no upload',
-                   description: error,
-                   variant: 'destructive',
-                 });
-               }}
-             />
+             {!isReadOnly && (
+               <FileUpload
+                 bucketName="process-documents"
+                 processId={process.id}
+                 acceptedFileTypes={['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/jpg']}
+                 maxFileSize={50 * 1024 * 1024}
+                 multiple={true}
+                 enableTextExtraction={true}
+                 onUploadComplete={(_, fileName) => {
+                   toast({
+                     title: 'Upload concluído',
+                     description: `Arquivo "${fileName}" enviado com sucesso.`,
+                   });
+                   window.location.reload();
+                 }}
+                 onUploadError={(error) => {
+                   toast({
+                     title: 'Erro no upload',
+                     description: error,
+                     variant: 'destructive',
+                   });
+                 }}
+               />
+             )}
              
              <DocumentViewer
                processId={process.id}
                bucketName="process-documents"
+               readOnly={isReadOnly}
                onDocumentDeleted={() => {
                  toast({
                    title: 'Documento excluído',
@@ -3300,7 +3449,9 @@ export default function ProcessDetail() {
                }}
              />
            </TabsContent>
+           )}
 
+          {visibleTabs.includes("agentes") && (
           <TabsContent value="agentes">
             <Card className="shadow-card">
               <CardHeader>
@@ -3317,7 +3468,8 @@ export default function ProcessDetail() {
                       if (!error) setRiskAgents(data || []);
                       await refreshDetectedAgents();
                     }}>Atualizar</Button>
-                    <Button onClick={async () => {
+                    <Button disabled={isReadOnly} onClick={async () => {
+                      if (isReadOnly) return;
                       await refreshDetectedAgents();
                       const combined = [...detectedInitialAgents, ...detectedDocumentAgents];
                       const unique = combined.filter((item, idx, arr) => {
@@ -3363,8 +3515,10 @@ export default function ProcessDetail() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
          </Tabs>
+        )}
 
 
       </div>

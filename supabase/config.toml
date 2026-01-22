@@ -14,3 +14,6 @@ verify_jwt = true
 
 [functions.schedule-email-track]
 verify_jwt = false
+
+[functions.owner-create-linked-user-account]
+verify_jwt = false

@@ -70,6 +70,7 @@ serve(async (req: Request) => {
     };
 
     const candidates = [
+      { select: "id, full_name, email, phone, created_at, is_blocked, blocked_at, blocked_reason, max_linked_users", order: true },
       { select: "id, full_name, email, phone, created_at, is_blocked, blocked_at, blocked_reason", order: true },
       { select: "id, full_name, email, phone, created_at", order: true },
       { select: "id, full_name, phone, created_at", order: true },
@@ -106,6 +107,7 @@ serve(async (req: Request) => {
       email: p.email ?? null,
       phone: p.phone ?? null,
       created_at: p.created_at ?? null,
+      max_linked_users: typeof p.max_linked_users === "number" ? p.max_linked_users : null,
       is_blocked: blockingSupported ? !!p.is_blocked : false,
       blocked_at: blockingSupported ? (p.blocked_at ?? null) : null,
       blocked_reason: blockingSupported ? (p.blocked_reason ?? null) : null,

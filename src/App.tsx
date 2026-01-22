@@ -34,6 +34,7 @@ const App = () => {
   const [isAdminUser, setIsAdminUser] = useState(false);
 
   const isBlockedEffective = isBlocked && !isAdminUser;
+  const isLinkedUser = Boolean((session?.user as any)?.user_metadata?.is_linked);
 
   const loginRedirect = () => {
     try {
@@ -151,7 +152,13 @@ const App = () => {
               />
               <Route
                 path="/usuarios-vinculados"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <LinkedUsers />) : <Navigate to={loginRedirect()} />}
+                element={
+                  session
+                    ? (isBlockedEffective
+                        ? <Navigate to="/bloqueado" />
+                        : (isLinkedUser ? <Navigate to="/dashboard" /> : <LinkedUsers />))
+                    : <Navigate to={loginRedirect()} />
+                }
               />
               <Route
                 path="/reset-password"

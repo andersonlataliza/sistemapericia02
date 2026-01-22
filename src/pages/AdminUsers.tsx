@@ -22,7 +22,7 @@ type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 
 type AdminUserRow = Pick<
   ProfileRow,
-  "id" | "full_name" | "email" | "phone" | "created_at" | "is_blocked" | "blocked_at" | "blocked_reason"
+  "id" | "full_name" | "email" | "phone" | "created_at" | "max_linked_users" | "is_blocked" | "blocked_at" | "blocked_reason"
 >;
 
 type AdminDatabaseUsageRow = {
@@ -95,6 +95,11 @@ export default function AdminUsers() {
   const [blockReason, setBlockReason] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const [limitOpen, setLimitOpen] = useState(false);
+  const [limitTarget, setLimitTarget] = useState<AdminUserRow | null>(null);
+  const [limitDraft, setLimitDraft] = useState("");
+  const [limitSaving, setLimitSaving] = useState(false);
+
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState({
     email: "",
@@ -102,6 +107,7 @@ export default function AdminUsers() {
     fullName: "",
     cpf: "",
     phone: "",
+    maxLinkedUsers: "",
     makeAdmin: false,
   });
   const [creating, setCreating] = useState(false);
@@ -177,10 +183,11 @@ export default function AdminUsers() {
         email: r.email ?? null,
         phone: r.phone ?? null,
         created_at: r.created_at ?? null,
+        max_linked_users: typeof r.max_linked_users === 'number' ? r.max_linked_users : null,
         is_blocked: r.is_blocked ?? false,
         blocked_at: r.blocked_at ?? null,
         blocked_reason: r.blocked_reason ?? null,
-        ...r // preserva outros campos que possam vir
+        ...r,
       }));
 
       setUsers(normalized as AdminUserRow[]);
@@ -204,6 +211,7 @@ export default function AdminUsers() {
         };
 
         const candidates = [
+          { select: "id, full_name, email, phone, created_at, max_linked_users", order: true },
           { select: "id, full_name, email, phone, created_at", order: true },
           { select: "id, full_name, phone, created_at", order: true },
           { select: "id, full_name, created_at", order: true },
@@ -232,6 +240,7 @@ export default function AdminUsers() {
             email: r.email ?? null,
             phone: r.phone ?? null,
             created_at: r.created_at ?? null,
+            max_linked_users: typeof r.max_linked_users === 'number' ? r.max_linked_users : null,
             is_blocked: false,
             blocked_at: null,
             blocked_reason: null,
@@ -383,6 +392,23 @@ export default function AdminUsers() {
     setDialogOpen(true);
   };
 
+  const openLimitDialog = async (row: AdminUserRow) => {
+    setLimitTarget(row);
+    setLimitDraft(typeof row.max_linked_users === 'number' ? String(row.max_linked_users) : "");
+    setLimitOpen(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('max_linked_users')
+        .eq('id', row.id)
+        .maybeSingle();
+      if (!error) {
+        const current = (data as { max_linked_users: number | null } | null)?.max_linked_users;
+        setLimitDraft(typeof current === 'number' ? String(current) : "");
+      }
+    } catch {}
+  };
+
   const openDeleteDialog = (row: AdminUserRow) => {
     setDeleteTarget(row);
     setDeleteOpen(true);
@@ -484,6 +510,47 @@ export default function AdminUsers() {
     }
   };
 
+  const saveLimit = async () => {
+    if (!limitTarget) return;
+
+    const raw = limitDraft.trim();
+    let nextValue: number | null = null;
+    if (raw) {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+        toast({ title: 'Limite inválido', description: 'Informe um número inteiro maior ou igual a 0.', variant: 'destructive' });
+        return;
+      }
+      nextValue = n;
+    }
+
+    setLimitSaving(true);
+    try {
+      const updatePayload: TablesUpdate<'profiles'> = {
+        max_linked_users: nextValue,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase
+        .from('profiles')
+        .update(updatePayload)
+        .eq('id', limitTarget.id);
+      if (error) {
+        toast({ title: 'Erro ao salvar limite', description: error.message, variant: 'destructive' });
+        return;
+      }
+
+      setUsers((prev) => prev.map((u) => (u.id === limitTarget.id ? { ...u, max_linked_users: nextValue } : u)));
+      toast({ title: 'Limite atualizado', description: limitTarget.email || limitTarget.full_name || 'Usuário' });
+      setLimitOpen(false);
+      setLimitTarget(null);
+      setLimitDraft("");
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error?.message || 'Falha ao salvar limite', variant: 'destructive' });
+    } finally {
+      setLimitSaving(false);
+    }
+  };
+
   const createUser = async () => {
     const email = createDraft.email.trim().toLowerCase();
     const password = createDraft.password;
@@ -507,6 +574,16 @@ export default function AdminUsers() {
       cpfToSend = cleanCPF(createDraft.cpf);
     }
 
+    let maxLinkedUsersToSend: number | undefined = undefined;
+    if (createDraft.maxLinkedUsers && createDraft.maxLinkedUsers.trim()) {
+      const n = Number(createDraft.maxLinkedUsers);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+        toast({ title: 'Limite inválido', description: 'Informe um número inteiro maior ou igual a 0.', variant: 'destructive' });
+        return;
+      }
+      maxLinkedUsersToSend = n;
+    }
+
     setCreating(true);
     try {
       const res = await SupabaseAPI.adminCreateUser({
@@ -516,6 +593,7 @@ export default function AdminUsers() {
         cpf: cpfToSend,
         phone: createDraft.phone.trim() || undefined,
         makeAdmin: Boolean(createDraft.makeAdmin),
+        maxLinkedUsers: maxLinkedUsersToSend,
       });
 
       if (!res?.success) {
@@ -530,6 +608,7 @@ export default function AdminUsers() {
           email: email,
           full_name: createDraft.fullName.trim() || null,
           phone: createDraft.phone.trim() || null,
+          max_linked_users: maxLinkedUsersToSend ?? null,
           updated_at: new Date().toISOString(),
         });
         if (profileError) {
@@ -539,7 +618,7 @@ export default function AdminUsers() {
 
       toast({ title: 'Usuário criado', description: email });
       setCreateOpen(false);
-      setCreateDraft({ email: '', password: '', fullName: '', cpf: '', phone: '', makeAdmin: false });
+      setCreateDraft({ email: '', password: '', fullName: '', cpf: '', phone: '', maxLinkedUsers: '', makeAdmin: false });
       await fetchUsers();
       await fetchAdmins();
     } catch (error: any) {
@@ -736,6 +815,7 @@ export default function AdminUsers() {
                     <TableHead>Criado em</TableHead>
                     <TableHead>Uso</TableHead>
                     <TableHead>Admin</TableHead>
+                    <TableHead>Limite vinc.</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
@@ -763,6 +843,9 @@ export default function AdminUsers() {
                           {adminUserIds.has(row.id) ? <Badge>Sim</Badge> : <Badge variant="secondary">Não</Badge>}
                         </TableCell>
                         <TableCell>
+                          {typeof row.max_linked_users === 'number' ? row.max_linked_users : '-'}
+                        </TableCell>
+                        <TableCell>
                           {row.is_blocked ? <Badge variant="destructive">Bloqueado</Badge> : <Badge variant="secondary">Ativo</Badge>}
                         </TableCell>
                         <TableCell className="text-right">
@@ -774,6 +857,9 @@ export default function AdminUsers() {
                               disabled={user.id === row.id}
                             >
                               {adminUserIds.has(row.id) ? "Remover admin" : "Tornar admin"}
+                            </Button>
+                            <Button type="button" variant="outline" onClick={() => openLimitDialog(row)}>
+                              Limite
                             </Button>
                             <Button
                               type="button"
@@ -872,6 +958,16 @@ export default function AdminUsers() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="create-max-linked">Limite de usuários vinculados</Label>
+                <Input
+                  id="create-max-linked"
+                  value={createDraft.maxLinkedUsers}
+                  onChange={(e) => setCreateDraft((p) => ({ ...p, maxLinkedUsers: e.target.value }))}
+                  placeholder="Deixe em branco para ilimitado"
+                />
+              </div>
+
               <div className="flex items-center justify-between rounded-md border p-3">
                 <div>
                   <div className="font-medium">Administrador</div>
@@ -893,6 +989,36 @@ export default function AdminUsers() {
               </Button>
               <Button type="button" onClick={createUser} disabled={creating}>
                 {creating ? "Criando..." : "Criar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={limitOpen} onOpenChange={setLimitOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Limite de usuários vinculados</DialogTitle>
+              <DialogDescription>
+                {limitTarget?.email || limitTarget?.full_name || 'Usuário'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <Label htmlFor="limit-max-linked">Limite</Label>
+              <Input
+                id="limit-max-linked"
+                value={limitDraft}
+                onChange={(e) => setLimitDraft(e.target.value)}
+                placeholder="Deixe em branco para ilimitado"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setLimitOpen(false)} disabled={limitSaving}>
+                Cancelar
+              </Button>
+              <Button type="button" onClick={saveLimit} disabled={limitSaving}>
+                {limitSaving ? 'Salvando...' : 'Salvar'}
               </Button>
             </DialogFooter>
           </DialogContent>

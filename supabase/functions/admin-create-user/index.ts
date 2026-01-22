@@ -12,6 +12,7 @@ type CreateUserRequest = {
   makeAdmin?: boolean;
   blocked?: boolean;
   blockedReason?: string;
+  maxLinkedUsers?: number;
 };
 
 const corsHeaders = {
@@ -74,6 +75,11 @@ serve(async (req: Request) => {
     const makeAdmin = Boolean(body.makeAdmin);
     const blocked = Boolean(body.blocked);
     const blockedReason = (body.blockedReason || "").trim();
+    const maxLinkedUsersRaw = body.maxLinkedUsers;
+    const maxLinkedUsers =
+      typeof maxLinkedUsersRaw === "number" && Number.isFinite(maxLinkedUsersRaw)
+        ? Math.trunc(maxLinkedUsersRaw)
+        : undefined;
 
     if (!email || !email.includes("@")) {
       return json(400, { success: false, error: "Email inválido" });
@@ -83,6 +89,9 @@ serve(async (req: Request) => {
     }
     if (cpf && cpf.length !== 11) {
       return json(400, { success: false, error: "CPF deve ter 11 dígitos" });
+    }
+    if (typeof maxLinkedUsers === "number" && maxLinkedUsers < 0) {
+      return json(400, { success: false, error: "Limite de usuários vinculados inválido" });
     }
 
     let newUserId: string | null = null;
@@ -143,6 +152,7 @@ serve(async (req: Request) => {
       updated_at: new Date().toISOString(),
       ...(fullName ? { full_name: fullName } : {}),
       ...(phone ? { phone } : {}),
+      ...(typeof maxLinkedUsers === "number" ? { max_linked_users: maxLinkedUsers } : {}),
     };
 
     const { error: profileError } = await supabaseAdmin
