@@ -128,6 +128,17 @@ export default function AuthForm() {
       toast({ title: "Informe seu email", description: "Digite o email para enviar o link de recuperação.", variant: "destructive" });
       return;
     }
+
+    if (!isSupabaseConfigured) {
+      toast({
+        title: "Configuração do Supabase ausente",
+        description:
+          "Defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY (ou VITE_SUPABASE_ANON_KEY) e reinicie o servidor.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setLoading(true);
       await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/reset-password` });
@@ -152,6 +163,15 @@ export default function AuthForm() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {!isSupabaseConfigured && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Configuração do Supabase ausente. Defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY (ou
+                VITE_SUPABASE_ANON_KEY) e reinicie o servidor.
+              </AlertDescription>
+            </Alert>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>

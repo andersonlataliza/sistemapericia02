@@ -205,6 +205,8 @@ export default function MaterialConsulta() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"arquivos" | "boletins" | "fispq">("arquivos");
 
+  const [materialOwnerId, setMaterialOwnerId] = useState<string | null>(null);
+
   const [theme, setTheme] = useState("Geral");
   const [customName, setCustomName] = useState("");
   const [query, setQuery] = useState("");
@@ -439,7 +441,28 @@ export default function MaterialConsulta() {
       if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
 
       const userId = userRes.user.id;
-      const root = `${userId}/material-consulta`;
+      const userMetadata = (userRes.user as any)?.user_metadata;
+
+      const ownerId = await (async () => {
+        const metaOwner = typeof userMetadata?.linked_owner_id === "string" ? String(userMetadata.linked_owner_id) : "";
+        try {
+          const { data, error } = await supabase
+            .from("linked_users")
+            .select("owner_user_id")
+            .eq("auth_user_id", userId)
+            .eq("status", "active")
+            .limit(1)
+            .maybeSingle();
+
+          if (!error && data?.owner_user_id) return String(data.owner_user_id);
+        } catch {
+        }
+        return metaOwner || userId;
+      })();
+
+      setMaterialOwnerId(ownerId);
+
+      const root = `${ownerId}/material-consulta`;
 
       const { data: themeEntries, error: themesErr } = await supabase.storage.from("process-documents").list(root, {
         limit: 200,
@@ -564,6 +587,7 @@ export default function MaterialConsulta() {
       if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
 
       const userId = userRes.user.id;
+      const ownerId = materialOwnerId || userId;
       if (missingFispqTableWarned && !force) {
         setFispqs(readLocalFispqs(userId));
         return;
@@ -581,7 +605,7 @@ export default function MaterialConsulta() {
       const localBefore = readLocalFispqs(userId);
       if (localBefore.length > 0) {
         const payload = localBefore.map((r) => ({
-          user_id: userId,
+          user_id: ownerId,
           product_identification: r.product_identification,
           hazard_identification: r.hazard_identification,
           composition: r.composition,
@@ -999,6 +1023,8 @@ export default function MaterialConsulta() {
 
       userId = userRes.user.id;
 
+      const ownerId = materialOwnerId || userId;
+
       const vOrNull = (v: string) => {
         const s = String(v || "").trim();
         return s ? s : null;
@@ -1078,7 +1104,7 @@ export default function MaterialConsulta() {
       }
 
       const { error } = await supabase.from("fispq_records").insert({
-        user_id: userId,
+        user_id: ownerId,
         product_identification: vOrNull(fispqDraft.product_identification),
         hazard_identification: vOrNull(fispqDraft.hazard_identification),
         composition: vOrNull(fispqDraft.composition),
@@ -1255,6 +1281,7 @@ export default function MaterialConsulta() {
 
                 <FileUpload
                   bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
                   pathPrefix={pathPrefix}
                   getTargetFileName={getTargetFileName}
                   acceptedFileTypes={[
@@ -1320,6 +1347,7 @@ export default function MaterialConsulta() {
 
                 <FileUpload
                   bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
                   pathPrefix="boletins-tecnicos"
                   acceptedFileTypes={[
                     "application/pdf",
@@ -1353,8 +1381,10 @@ export default function MaterialConsulta() {
                       return;
                     }
 
+                    const ownerId = materialOwnerId || userRes.user.id;
+
                     const { error } = await supabase.from("manufacturer_technical_bulletins").insert({
-                      user_id: userRes.user.id,
+                      user_id: ownerId,
                       epi,
                       ca,
                       protection_type: protectionType,
@@ -1490,6 +1520,7 @@ export default function MaterialConsulta() {
 
                 <FileUpload
                   bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
                   pathPrefix="fispq"
                   acceptedFileTypes={[
                     "application/pdf",

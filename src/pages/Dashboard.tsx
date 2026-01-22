@@ -29,6 +29,7 @@ type Process = Tables<'processes'> & {
 export default function Dashboard() {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isLinkedUser, setIsLinkedUser] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { statistics, loading: statsLoading, refetch: refetchStats } = useProcessStatistics();
@@ -120,16 +121,6 @@ const saveEdit = async () => {
         return;
       }
 
-      // Buscar processos próprios do usuário (limitado a 5 para o dashboard)
-      const { data: ownProcesses, error: ownError } = await supabase
-        .from("processes")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(5);
-
-      if (ownError) throw ownError;
-
       const { data: linkedAccess, error: linkedError } = await supabase
         .from("linked_users")
         .select(`
@@ -144,40 +135,63 @@ const saveEdit = async () => {
         .eq("auth_user_id", user.id)
         .eq("status", "active");
 
-      if (linkedError && linkedError.code !== 'PGRST116') {
-        console.warn("Erro ao buscar processos vinculados:", linkedError);
+      if (linkedError && linkedError.code !== "PGRST116") {
+        console.warn("Erro ao buscar usuário vinculado:", linkedError);
       }
 
-      // Combinar processos próprios com processos acessíveis
-      let allProcesses = ownProcesses || [];
-      
-      if (linkedAccess && linkedAccess.length > 0) {
-        const linkedProcesses = linkedAccess
-          .flatMap((access) =>
-            (access.process_access || [])
-              .map((pa) => {
-                const proc = pa.processes as Tables<'processes'>;
-                if (!proc || proc.user_id !== access.owner_user_id) return null;
-                return {
-                  ...proc,
-                  _is_linked: true,
-                  _linked_permissions: access.permissions,
-                };
-              })
-              .filter(Boolean),
-          )
-          .filter(Boolean) as any[];
-        
-        // Evitar duplicatas e limitar a 5 processos no total
-        const ownProcessIds = new Set(allProcesses.map(p => p.id));
-        const uniqueLinkedProcesses = linkedProcesses.filter(p => !ownProcessIds.has(p.id));
-        
-        allProcesses = [...allProcesses, ...uniqueLinkedProcesses]
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 5); // Limitar a 5 processos para o dashboard
+      const isLinked = Boolean(linkedAccess && linkedAccess.length > 0);
+      setIsLinkedUser(isLinked);
+
+      const isMissingColumnError = (e: any) => {
+        const msg = String(e?.message || "");
+        const details = String(e?.details || "");
+        const hint = String(e?.hint || "");
+        const code = String(e?.code || "");
+        const status = Number(e?.status || e?.statusCode || 0);
+        const raw = `${msg} ${details} ${hint}`.toLowerCase();
+        return (
+          status === 400 && raw.includes("created_by") && (raw.includes("does not exist") || raw.includes("could not find") || raw.includes("undefined column"))
+        ) || (
+          code === "42703" ||
+          code === "PGRST204" ||
+          (/does not exist|undefined column|column\s+.+\s+does not exist|could not find the/i.test(msg) && raw.includes("created_by"))
+        );
+      };
+
+      let listData: any[] | null = null;
+      let listError: any = null;
+      if (isLinked) {
+        const res = await supabase
+          .from("processes")
+          .select("*")
+          .eq("created_by", user.id)
+          .order("created_at", { ascending: false })
+          .limit(5);
+        listData = res.data as any;
+        listError = res.error as any;
+        if (listError && isMissingColumnError(listError)) {
+          toast({
+            title: "Atualização do banco pendente",
+            description: "A coluna created_by ainda não existe no Supabase. Aplique as migrations para habilitar o isolamento de processos do vinculado.",
+            variant: "destructive",
+          });
+          listData = [];
+          listError = null;
+        }
+      } else {
+        const res = await supabase
+          .from("processes")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(5);
+        listData = res.data as any;
+        listError = res.error as any;
       }
 
-      setProcesses(allProcesses);
+      if (listError) throw listError;
+
+      setProcesses((listData || []) as any);
       
       // Recarregar estatísticas após buscar processos
       refetchStats();
@@ -281,11 +295,15 @@ const saveEdit = async () => {
             {processes.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-4">
-                  Você ainda não tem processos cadastrados
+                  {isLinkedUser
+                    ? "Nenhum processo foi compartilhado com este usuário."
+                    : "Você ainda não tem processos cadastrados"}
                 </p>
-                <Button onClick={() => navigate("/novo-processo")}>
-                  Criar Primeiro Processo
-                </Button>
+                {!isLinkedUser && (
+                  <Button onClick={() => navigate("/novo-processo")}>
+                    Criar Primeiro Processo
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">

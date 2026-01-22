@@ -553,22 +553,27 @@ export default function ProcessDetail() {
       let isLinked = false;
       let linkedPermissions: any = null;
       if (authUser && authUser.id !== data.user_id) {
-        try {
-          const { data: accessRow, error: accessError } = await (supabase as any)
-            .from("process_access")
-            .select("linked_users!inner(permissions, status, auth_user_id)")
-            .eq("process_id", id)
-            .eq("linked_users.auth_user_id", authUser.id)
-            .eq("linked_users.status", "active")
-            .maybeSingle();
-
-          if (!accessError && accessRow?.linked_users) {
-            isLinked = true;
-            linkedPermissions = accessRow.linked_users.permissions;
-          }
-        } catch {
+        if ((data as any)?.created_by === authUser.id) {
           isLinked = false;
           linkedPermissions = null;
+        } else {
+          try {
+            const { data: accessRow, error: accessError } = await (supabase as any)
+              .from("process_access")
+              .select("linked_users!inner(permissions, status, auth_user_id)")
+              .eq("process_id", id)
+              .eq("linked_users.auth_user_id", authUser.id)
+              .eq("linked_users.status", "active")
+              .maybeSingle();
+
+            if (!accessError && accessRow?.linked_users) {
+              isLinked = true;
+              linkedPermissions = accessRow.linked_users.permissions;
+            }
+          } catch {
+            isLinked = false;
+            linkedPermissions = null;
+          }
         }
       }
       
@@ -3416,6 +3421,7 @@ export default function ProcessDetail() {
                <FileUpload
                  bucketName="process-documents"
                  processId={process.id}
+                 targetUserId={process.user_id}
                  acceptedFileTypes={['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/jpg']}
                  maxFileSize={50 * 1024 * 1024}
                  multiple={true}

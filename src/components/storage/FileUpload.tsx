@@ -12,6 +12,7 @@ import { extractDocumentTextOCR } from '@/lib/llm';
 interface FileUploadProps {
   bucketName: 'process-documents' | 'avatars' | 'report-templates';
   processId?: string;
+  targetUserId?: string;
   onUploadComplete?: (filePath: string, fileName: string, extractedText?: string) => void;
   onUploadError?: (error: string) => void;
   acceptedFileTypes?: string[];
@@ -36,6 +37,7 @@ interface UploadingFile {
 export default function FileUpload({
   bucketName,
   processId,
+  targetUserId,
   onUploadComplete,
   onUploadError,
   acceptedFileTypes = ['*/*'],
@@ -100,7 +102,7 @@ export default function FileUpload({
       const targetFileName = getTargetFileName ? getTargetFileName(file) : file.name;
 
       // Generate file path
-      const filePath = generateFilePath(user.id, targetFileName);
+      const filePath = generateFilePath(targetUserId || user.id, targetFileName);
 
       // Update uploading state
       setUploadingFiles(prev => prev.map(f => 

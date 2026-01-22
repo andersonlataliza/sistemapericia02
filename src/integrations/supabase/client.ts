@@ -2,10 +2,90 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = String(import.meta.env.VITE_SUPABASE_URL || '').trim();
+const SUPABASE_PUBLISHABLE_KEY = String(
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+).trim();
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
+
+const supabaseConfigErrorMessage =
+  'Supabase config missing: set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY)';
+
+const makeDisabledError = () => ({
+  message: supabaseConfigErrorMessage,
+});
+
+const makeDisabledResponse = () => ({
+  data: null,
+  error: makeDisabledError(),
+});
+
+const makeDisabledBuilder = () => {
+  const builder: any = {};
+  const chain = () => builder;
+
+  builder.select = chain;
+  builder.eq = chain;
+  builder.neq = chain;
+  builder.gt = chain;
+  builder.gte = chain;
+  builder.lt = chain;
+  builder.lte = chain;
+  builder.like = chain;
+  builder.ilike = chain;
+  builder.in = chain;
+  builder.is = chain;
+  builder.not = chain;
+  builder.contains = chain;
+  builder.containedBy = chain;
+  builder.overlaps = chain;
+  builder.order = chain;
+  builder.range = chain;
+  builder.limit = chain;
+  builder.single = chain;
+  builder.maybeSingle = chain;
+  builder.insert = chain;
+  builder.upsert = chain;
+  builder.update = chain;
+  builder.delete = chain;
+
+  builder.then = (onFulfilled: any, onRejected: any) =>
+    Promise.resolve(makeDisabledResponse()).then(onFulfilled, onRejected);
+  builder.catch = (onRejected: any) => Promise.resolve(makeDisabledResponse()).catch(onRejected);
+  builder.finally = (onFinally: any) => Promise.resolve(makeDisabledResponse()).finally(onFinally);
+
+  return builder;
+};
+
+const createDisabledSupabaseClient = (): SupabaseClient<Database> => {
+  const noop = () => {};
+
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: makeDisabledError() }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: noop } } }),
+      signInWithPassword: async () => ({ data: { session: null, user: null }, error: makeDisabledError() }),
+      signOut: async () => ({ error: makeDisabledError() }),
+      resetPasswordForEmail: async () => ({ data: null, error: makeDisabledError() }),
+      getUser: async () => ({ data: { user: null }, error: makeDisabledError() }),
+    } as any,
+    from: () => makeDisabledBuilder(),
+    rpc: async () => makeDisabledResponse(),
+    functions: {
+      invoke: async () => makeDisabledResponse(),
+    } as any,
+    storage: {
+      from: () => ({
+        upload: async () => makeDisabledResponse(),
+        download: async () => makeDisabledResponse(),
+        remove: async () => makeDisabledResponse(),
+        list: async () => makeDisabledResponse(),
+        getPublicUrl: () => ({ data: { publicUrl: '' } }),
+      }),
+    } as any,
+  } as any;
+};
 
 // Singleton pattern to prevent multiple client instances
 let supabaseInstance: SupabaseClient<Database> | null = null;
@@ -16,10 +96,16 @@ const createSupabaseClient = (): SupabaseClient<Database> => {
   }
 
   if (!isSupabaseConfigured) {
-    console.error('Supabase config missing: set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY)');
+    supabaseInstance = createDisabledSupabaseClient();
+    return supabaseInstance;
   }
 
   supabaseInstance = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    global: {
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+      },
+    },
     auth: {
       storage: localStorage,
       persistSession: true,

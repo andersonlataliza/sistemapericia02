@@ -215,10 +215,57 @@ export class SupabaseAPI {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Usuário não autenticado');
 
-    const { data: processes, error: processesError } = await supabase
-      .from('processes')
-      .select('id, status, created_at')
-      .eq('user_id', user.id);
+    const { data: linkedAccess, error: linkedError } = await supabase
+      .from('linked_users')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .eq('status', 'active')
+      .limit(1);
+
+    if (linkedError && (linkedError as any).code !== 'PGRST116') {
+      console.warn('Falha ao carregar vínculo do usuário para estatísticas', linkedError);
+    }
+
+    const isLinked = Boolean(linkedAccess && linkedAccess.length > 0);
+
+    const isMissingColumnError = (e: any) => {
+      const msg = String(e?.message || "");
+      const details = String(e?.details || "");
+      const hint = String(e?.hint || "");
+      const code = String(e?.code || "");
+      const status = Number(e?.status || e?.statusCode || 0);
+      const raw = `${msg} ${details} ${hint}`.toLowerCase();
+      return (
+        status === 400 && raw.includes("created_by") && (raw.includes("does not exist") || raw.includes("could not find") || raw.includes("undefined column"))
+      ) || (
+        code === "42703" ||
+        code === "PGRST204" ||
+        (/does not exist|undefined column|column\s+.+\s+does not exist|could not find the/i.test(msg) && raw.includes("created_by"))
+      );
+    };
+
+    let processes: any[] | null = null;
+    let processesError: any = null;
+
+    if (isLinked) {
+      const res = await supabase
+        .from('processes')
+        .select('id, status, created_at')
+        .eq('created_by', user.id);
+      processes = res.data as any;
+      processesError = res.error as any;
+      if (processesError && isMissingColumnError(processesError)) {
+        processes = [];
+        processesError = null;
+      }
+    } else {
+      const res = await supabase
+        .from('processes')
+        .select('id, status, created_at')
+        .eq('user_id', user.id);
+      processes = res.data as any;
+      processesError = res.error as any;
+    }
 
     if (processesError) throw new Error('Falha ao carregar estatísticas dos processos');
 
@@ -235,7 +282,9 @@ export class SupabaseAPI {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       monthlyStatsMap.set(key, (monthlyStatsMap.get(key) || 0) + 1);
     });
-    const monthly = Array.from(monthlyStatsMap.entries()).map(([month, count]) => ({ month, count }));
+    const monthly = Array.from(monthlyStatsMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, count]) => ({ month, count }));
 
     const completion_rate = total > 0 ? Number(((completed / total) * 100).toFixed(2)) : 0;
 

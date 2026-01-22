@@ -266,67 +266,68 @@ export default function Processes() {
       }
       setUserId(user.id);
 
-      // Buscar processos próprios do usuário
-      const { data: ownProcesses, error: ownError } = await supabase
-        .from("processes")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (ownError) throw ownError;
-
-      // Buscar processos acessíveis através de usuários vinculados
-      // Primeiro, buscar se o usuário atual tem CPF vinculado a outros usuários
       const { data: linkedAccess, error: linkedError } = await supabase
         .from("linked_users")
-        .select(`
-          id,
-          owner_user_id,
-          permissions,
-          process_access!inner(
-            process_id,
-            processes!inner(*)
-          )
-        `)
+        .select("id")
         .eq("auth_user_id", user.id)
-        .eq("status", "active");
+        .eq("status", "active")
+        .limit(1);
 
-      if (linkedError && linkedError.code !== 'PGRST116') { // PGRST116 = no rows returned
-        console.warn("Erro ao buscar processos vinculados:", linkedError);
+      if (linkedError && linkedError.code !== "PGRST116") {
+        console.warn("Erro ao buscar usuário vinculado:", linkedError);
       }
 
-      // Combinar processos próprios com processos acessíveis
-      let allProcesses = ownProcesses || [];
-      
-      if (linkedAccess && linkedAccess.length > 0) {
-        const linkedProcesses = linkedAccess
-          .flatMap((access) =>
-            (access.process_access || [])
-              .map((pa) => {
-                const proc = pa.processes as Tables<'processes'>;
-                if (!proc || proc.user_id !== access.owner_user_id) return null;
-                return {
-                  ...proc,
-                  _is_linked: true,
-                  _linked_permissions: access.permissions,
-                };
-              })
-              .filter(Boolean),
-          )
-          .filter(Boolean) as any[];
-        
-        // Evitar duplicatas (caso o usuário seja dono e também tenha acesso vinculado)
-        const ownProcessIds = new Set(allProcesses.map(p => p.id));
-        const uniqueLinkedProcesses = linkedProcesses.filter(p => !ownProcessIds.has(p.id));
-        
-        allProcesses = [...allProcesses, ...uniqueLinkedProcesses];
+      const isLinked = Boolean(linkedAccess && linkedAccess.length > 0);
+
+      const isMissingColumnError = (e: any) => {
+        const msg = String(e?.message || "");
+        const details = String(e?.details || "");
+        const hint = String(e?.hint || "");
+        const code = String(e?.code || "");
+        const status = Number(e?.status || e?.statusCode || 0);
+        const raw = `${msg} ${details} ${hint}`.toLowerCase();
+        return (
+          status === 400 && raw.includes("created_by") && (raw.includes("does not exist") || raw.includes("could not find") || raw.includes("undefined column"))
+        ) || (
+          code === "42703" ||
+          code === "PGRST204" ||
+          (/does not exist|undefined column|column\s+.+\s+does not exist|could not find the/i.test(msg) && raw.includes("created_by"))
+        );
+      };
+
+      let listData: any[] | null = null;
+      let listError: any = null;
+      if (isLinked) {
+        const res = await supabase
+          .from("processes")
+          .select("*")
+          .eq("created_by", user.id)
+          .order("created_at", { ascending: false });
+        listData = res.data as any;
+        listError = res.error as any;
+        if (listError && isMissingColumnError(listError)) {
+          toast({
+            title: "Atualização do banco pendente",
+            description: "A coluna created_by ainda não existe no Supabase. Aplique as migrations para habilitar o isolamento de processos do vinculado.",
+            variant: "destructive",
+          });
+          listData = [];
+          listError = null;
+        }
+      } else {
+        const res = await supabase
+          .from("processes")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+        listData = res.data as any;
+        listError = res.error as any;
       }
 
-      // Ordenar todos os processos por data de criação
-      allProcesses.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      if (listError) throw listError;
 
-      setProcesses(allProcesses);
-      setFilteredProcesses(allProcesses);
+      setProcesses((listData || []) as any);
+      setFilteredProcesses((listData || []) as any);
     } catch (error) {
       console.error("Erro ao buscar processos:", error);
     } finally {

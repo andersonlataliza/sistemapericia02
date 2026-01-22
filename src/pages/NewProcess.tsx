@@ -51,10 +51,24 @@ export default function NewProcess() {
       try {
         const user = await getAuthenticatedUser();
         if (!user) return;
+
+        let ownerIdForLookup = user.id;
+        try {
+          const { data: linkedRow } = await supabase
+            .from("linked_users")
+            .select("owner_user_id")
+            .eq("auth_user_id", user.id)
+            .eq("status", "active")
+            .maybeSingle();
+          if (linkedRow?.owner_user_id) ownerIdForLookup = linkedRow.owner_user_id;
+        } catch {
+          ownerIdForLookup = user.id;
+        }
+
         const { data, error } = await supabase
           .from("processes")
           .select("court, report_config")
-          .eq("user_id", user.id)
+          .eq("user_id", ownerIdForLookup)
           .order("updated_at", { ascending: false })
           .limit(100);
         if (error) return;
@@ -194,6 +208,19 @@ export default function NewProcess() {
       const user = await getAuthenticatedUser();
       if (!user) throw new Error("Usuário não autenticado");
 
+      let ownerUserId = user.id;
+      try {
+        const { data: linkedRow } = await supabase
+          .from("linked_users")
+          .select("owner_user_id")
+          .eq("auth_user_id", user.id)
+          .eq("status", "active")
+          .maybeSingle();
+        if (linkedRow?.owner_user_id) ownerUserId = linkedRow.owner_user_id;
+      } catch {
+        ownerUserId = user.id;
+      }
+
       const safeParseJson = <T,>(value: unknown, fallback: T): T => {
         try {
           if (value == null) return fallback;
@@ -242,7 +269,7 @@ export default function NewProcess() {
       const { data: sampleCfg } = await supabase
         .from("processes")
         .select("report_config, updated_at")
-        .eq("user_id", user.id)
+        .eq("user_id", ownerUserId)
         .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -282,7 +309,7 @@ export default function NewProcess() {
         inspection_date: normalizeIsoDateTime(inspectionDate),
         inspection_address: inspectionAddress,
         inspection_city: city,
-        user_id: user.id,
+        user_id: ownerUserId,
         report_config: rcForNew,
       };
 
@@ -293,7 +320,7 @@ export default function NewProcess() {
         court,
         inspection_date: normalizeIsoDateTime(inspectionDate),
         inspection_address: inspectionAddress,
-        user_id: user.id,
+        user_id: ownerUserId,
       };
 
       let inserted = await supabase

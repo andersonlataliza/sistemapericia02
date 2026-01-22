@@ -238,6 +238,7 @@ export type Database = {
           conclusion: string | null
           court: string | null
           cover_data: Json | null
+          created_by: string | null
           created_at: string
           defendant_data: Json | null
           defendant_email: string | null
@@ -294,6 +295,7 @@ export type Database = {
           conclusion?: string | null
           court?: string | null
           cover_data?: Json | null
+          created_by?: string | null
           created_at?: string
           defendant_data?: Json | null
           defendant_email?: string | null
@@ -350,6 +352,7 @@ export type Database = {
           conclusion?: string | null
           court?: string | null
           cover_data?: Json | null
+          created_by?: string | null
           created_at?: string
           defendant_data?: Json | null
           defendant_email?: string | null
