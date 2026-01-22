@@ -24,6 +24,7 @@ export default function PericulosityResultsSection({ value, onChange, rowsInAnal
   const [freeText, setFreeText] = useState<string>("");
   const [tplId, setTplId] = useState<string>("");
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const currentImages = useMemo(() => (Array.isArray(images) ? images : []).filter((x) => x && String((x as any).dataUrl || '').trim()), [images]);
   const availableTemplates = useMemo(() => {
@@ -113,6 +114,33 @@ export default function PericulosityResultsSection({ value, onChange, rowsInAnal
       reader.readAsDataURL(blob);
     });
     return dataUrl;
+  };
+
+  const handlePickedImages = async (files: File[]) => {
+    const picked = Array.from(files || []).filter(Boolean);
+    if (!picked.length) return;
+    setImageLoading(true);
+    try {
+      const built: { dataUrl: string; caption?: string }[] = [];
+      for (const f of picked) {
+        try {
+          const dataUrl = await buildImageDataUrl(f);
+          if (dataUrl) built.push({ dataUrl, caption: "" });
+        } catch {}
+      }
+      if (built.length > 0) {
+        const next = [...currentImages, ...built];
+        onImagesChange?.(next);
+      }
+    } finally {
+      setImageLoading(false);
+      try {
+        if (imageInputRef.current) imageInputRef.current.value = "";
+      } catch {}
+      try {
+        if (cameraInputRef.current) cameraInputRef.current.value = "";
+      } catch {}
+    }
   };
 
   return (
@@ -216,27 +244,25 @@ export default function PericulosityResultsSection({ value, onChange, rowsInAnal
                 accept="image/*"
                 multiple
                 disabled={imageLoading}
-                onChange={async (e) => {
-                  const files = Array.from(e.target.files || []).filter(Boolean);
-                  if (!files.length) return;
-                  setImageLoading(true);
-                  try {
-                    const built: { dataUrl: string; caption?: string }[] = [];
-                    for (const f of files) {
-                      try {
-                        const dataUrl = await buildImageDataUrl(f);
-                        if (dataUrl) built.push({ dataUrl, caption: "" });
-                      } catch {}
-                    }
-                    const next = [...currentImages, ...built];
-                    onImagesChange(next);
-                  } finally {
-                    setImageLoading(false);
-                    try {
-                      if (imageInputRef.current) imageInputRef.current.value = "";
-                    } catch {}
-                  }
-                }}
+                onChange={async (e) => handlePickedImages(Array.from(e.target.files || []))}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={imageLoading}
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                Tirar foto (celular)
+              </Button>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                className="hidden"
+                disabled={imageLoading}
+                onChange={async (e) => handlePickedImages(Array.from(e.target.files || []))}
               />
             </div>
             {currentImages.length > 0 && (
