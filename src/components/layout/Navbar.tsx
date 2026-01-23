@@ -34,7 +34,20 @@ export default function Navbar() {
         if (session?.user?.email) {
           setUserEmail(session.user.email);
         }
-        setIsLinked(Boolean((session?.user as any)?.user_metadata?.is_linked));
+        let linked = Boolean((session?.user as any)?.user_metadata?.is_linked);
+        if (session?.user?.id) {
+          try {
+            const { data: linkedAccess, error: linkedError } = await supabase
+              .from("linked_users")
+              .select("id")
+              .eq("auth_user_id", session.user.id)
+              .eq("status", "active")
+              .limit(1);
+            if (!linkedError) linked = linked || Boolean(linkedAccess && linkedAccess.length > 0);
+          } catch {
+          }
+        }
+        setIsLinked(linked);
 
         const { data, error } = await supabase.rpc("is_admin");
         if (error) {
@@ -82,9 +95,11 @@ export default function Navbar() {
               <Link to="/processos">
                 <Button variant="ghost">Processos</Button>
               </Link>
-              <Link to="/configuracao-relatorio">
-                <Button variant="ghost">Configuração do Relatório</Button>
-              </Link>
+              {!isLinked && (
+                <Link to="/configuracao-relatorio">
+                  <Button variant="ghost">Configuração do Relatório</Button>
+                </Link>
+              )}
               <Link to="/material-consulta">
                 <Button variant="ghost">Material de Consulta</Button>
               </Link>
@@ -124,7 +139,9 @@ export default function Navbar() {
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/dashboard")}>Dashboard</Button>
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/agendamento")}>Agendamento</Button>
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/processos")}>Processos</Button>
-                    <Button variant="ghost" className="justify-start" onClick={() => navigate("/configuracao-relatorio")}>Configuração do Relatório</Button>
+                    {!isLinked && (
+                      <Button variant="ghost" className="justify-start" onClick={() => navigate("/configuracao-relatorio")}>Configuração do Relatório</Button>
+                    )}
                     <Button variant="ghost" className="justify-start" onClick={() => navigate("/material-consulta")}>Material de Consulta</Button>
                     {!isLinked && (
                       <Button variant="ghost" className="justify-start" onClick={() => navigate("/usuarios-vinculados")}>Usuários Vinculados</Button>

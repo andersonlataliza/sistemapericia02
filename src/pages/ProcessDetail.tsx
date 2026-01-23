@@ -1053,6 +1053,7 @@ export default function ProcessDetail() {
         court: process.court,
         status: normalizeStatus(process.status),
         distribution_date: normalizeDateOnly(process.distribution_date),
+        delivery_date: normalizeDateOnly(process.delivery_date),
         inspection_date: normalizeIsoDateTime(process.inspection_date),
         inspection_address: process.inspection_address,
         inspection_time: process.inspection_time || null,
@@ -1080,6 +1081,8 @@ export default function ProcessDetail() {
             defendant_name: payloadFull.defendant_name,
             court: payloadFull.court,
             status: payloadFull.status,
+            distribution_date: payloadFull.distribution_date,
+            delivery_date: payloadFull.delivery_date,
             inspection_date: payloadFull.inspection_date,
             inspection_address: payloadFull.inspection_address,
           };
@@ -1668,20 +1671,25 @@ export default function ProcessDetail() {
 
   const handleExportDocx = async () => {
     if (!process?.id) return;
-    if ((process as any)._is_linked) {
+    const isLinkedView = Boolean((process as any)._is_linked);
+    const rawLinkedPermissions = ((process as any)._linked_permissions || {}) as any;
+    const canExport = !isLinkedView || Boolean(rawLinkedPermissions?.view_reports ?? false);
+    if (!canExport) {
       toast({
-        title: "Somente visualização",
-        description: "Você não tem permissão para exportar/gerar relatórios neste processo.",
+        title: "Acesso negado",
+        description: "Este usuário não tem permissão para exportar relatórios.",
         variant: "destructive",
       });
       return;
     }
-    await handleSave();
+    if (!isLinkedView) await handleSave();
     // Aviso: imagem de cabeçalho ausente (prossegue mesmo assim)
     if (!hasHeaderImage()) {
       toast({
         title: "Exportando sem imagem de cabeçalho",
-        description: "Você pode adicionar uma imagem em Configuração do Relatório → Cabeçalho.",
+        description: isLinkedView
+          ? "Solicite ao proprietário da conta para adicionar uma imagem no cabeçalho."
+          : "Você pode adicionar uma imagem em Configuração do Relatório → Cabeçalho.",
       });
     }
 
@@ -1750,20 +1758,25 @@ export default function ProcessDetail() {
 
   const handleExportPdf = async () => {
     if (!process?.id) return;
-    if ((process as any)._is_linked) {
+    const isLinkedView = Boolean((process as any)._is_linked);
+    const rawLinkedPermissions = ((process as any)._linked_permissions || {}) as any;
+    const canExport = !isLinkedView || Boolean(rawLinkedPermissions?.view_reports ?? false);
+    if (!canExport) {
       toast({
-        title: "Somente visualização",
-        description: "Você não tem permissão para exportar/gerar relatórios neste processo.",
+        title: "Acesso negado",
+        description: "Este usuário não tem permissão para exportar relatórios.",
         variant: "destructive",
       });
       return;
     }
-    await handleSave();
+    if (!isLinkedView) await handleSave();
     // Aviso: imagem de cabeçalho ausente (prossegue mesmo assim)
     if (!hasHeaderImage()) {
       toast({
         title: "Exportando sem imagem de cabeçalho",
-        description: "Você pode adicionar uma imagem em Configuração do Relatório → Cabeçalho.",
+        description: isLinkedView
+          ? "Solicite ao proprietário da conta para adicionar uma imagem no cabeçalho."
+          : "Você pode adicionar uma imagem em Configuração do Relatório → Cabeçalho.",
       });
     }
 
@@ -1855,6 +1868,7 @@ export default function ProcessDetail() {
   const canViewProcesses = !isReadOnly || linkedPermissions.view_processes;
   const canViewDocuments = !isReadOnly || linkedPermissions.view_documents;
   const canViewReports = !isReadOnly || linkedPermissions.view_reports;
+  const canExportReports = canViewReports;
 
   const canViewTab = (tab: string) => {
     if (!isReadOnly) return true;
@@ -2041,6 +2055,14 @@ export default function ProcessDetail() {
                           type="date"
                           value={process.distribution_date || ""}
                           onChange={(e) => updateProcess("distribution_date", e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-1">Data máxima de entrega do laudo</p>
+                        <Input
+                          type="date"
+                          value={process.delivery_date || ""}
+                          onChange={(e) => updateProcess("delivery_date", e.target.value)}
                         />
                       </div>
                       <div>
@@ -2445,7 +2467,7 @@ export default function ProcessDetail() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
-                          <Button variant="outline" onClick={handleExportDocx} disabled={!process?.id || reportLoading || isReadOnly}>
+                          <Button variant="outline" onClick={handleExportDocx} disabled={!process?.id || reportLoading || !canExportReports}>
                             <FileDown className="w-4 h-4 mr-2" /> Exportar DOCX
                           </Button>
                         </span>
@@ -2459,7 +2481,7 @@ export default function ProcessDetail() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
-                          <Button variant="outline" onClick={handleExportPdf} disabled={!process?.id || reportLoading || isReadOnly}>
+                          <Button variant="outline" onClick={handleExportPdf} disabled={!process?.id || reportLoading || !canExportReports}>
                             <FileDown className="w-4 h-4 mr-2" /> Exportar PDF
                           </Button>
                         </span>
@@ -2855,7 +2877,20 @@ export default function ProcessDetail() {
                 onUpdateNR16AnnexExposure={updateNR16AnnexExposure}
                 onTablesChanged={(nr15, nr16) => {
                   const rc = safeParseJson(process.report_config, {}) as any;
-                  const nextRc = { ...rc, analysis_tables: { nr15, nr16 } };
+                  const shouldInclude15 = Array.isArray(nr15) && nr15.some((r: any) => {
+                    const exposure = String(r?.exposure || "").trim();
+                    return exposure === "Em análise" || exposure === "Ocorre exposição";
+                  });
+                  const shouldInclude16 = Array.isArray(nr16) && nr16.some((r: any) => {
+                    const exposure = String(r?.exposure || "").trim();
+                    return exposure === "Em análise" || exposure === "Ocorre exposição";
+                  });
+
+                  const nextFlags = { ...(rc?.flags || {}) } as any;
+                  if (shouldInclude15) nextFlags.include_nr15_item15_table = true;
+                  if (shouldInclude16) nextFlags.include_nr16_item15_table = true;
+
+                  const nextRc = { ...rc, analysis_tables: { nr15, nr16 }, flags: nextFlags };
                   updateProcess("report_config" as any, nextRc);
                   try { localStorage.setItem(`pericia_tables_${process.user_id}_${process.id}`, JSON.stringify({ nr15, nr16 })); } catch {}
                 }}

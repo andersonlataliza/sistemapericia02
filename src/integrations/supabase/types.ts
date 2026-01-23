@@ -248,6 +248,7 @@ export type Database = {
           diligence_data: Json | null
           documents_presented: Json | null
           distribution_date: string | null
+          delivery_date: string | null
           epcs: string | null
           epis: Json | null
           expert_fee: number | null
@@ -305,6 +306,7 @@ export type Database = {
           diligence_data?: Json | null
           documents_presented?: Json | null
           distribution_date?: string | null
+          delivery_date?: string | null
           epcs?: string | null
           epis?: Json | null
           expert_fee?: number | null
@@ -362,6 +364,7 @@ export type Database = {
           diligence_data?: Json | null
           documents_presented?: Json | null
           distribution_date?: string | null
+          delivery_date?: string | null
           epcs?: string | null
           epis?: Json | null
           expert_fee?: number | null

@@ -185,6 +185,44 @@ function cmToPt(cm: number): number {
   return Math.round(cm * 72 / 2.54);
 }
 
+const DOCX_TABLE_BORDER = { style: BorderStyle.SINGLE, size: 6, color: "BFBFBF" };
+const DOCX_TABLE_BORDERS = {
+  top: DOCX_TABLE_BORDER,
+  bottom: DOCX_TABLE_BORDER,
+  left: DOCX_TABLE_BORDER,
+  right: DOCX_TABLE_BORDER,
+  insideHorizontal: DOCX_TABLE_BORDER,
+  insideVertical: DOCX_TABLE_BORDER,
+};
+const DOCX_TABLE_HEADER_FILL = "F2F2F2";
+const DOCX_TABLE_CELL_MARGINS = { top: 120, bottom: 120, left: 160, right: 160 };
+
+type DocxWidthType = (typeof WidthType)[keyof typeof WidthType];
+type DocxAlignmentType = (typeof AlignmentType)[keyof typeof AlignmentType];
+
+function docxCell(
+  children: Paragraph[],
+  options?: { header?: boolean; width?: { size: number; type: DocxWidthType } }
+): TableCell {
+  return new TableCell({
+    children,
+    width: options?.width,
+    shading: options?.header ? { fill: DOCX_TABLE_HEADER_FILL } : undefined,
+    margins: DOCX_TABLE_CELL_MARGINS,
+  });
+}
+
+function docxCellText(
+  text: string,
+  options?: { bold?: boolean; size?: number; alignment?: DocxAlignmentType }
+): Paragraph {
+  return new Paragraph({
+    children: [new TextRun({ text: String(text ?? ""), bold: options?.bold, size: options?.size ?? 24 })],
+    alignment: options?.alignment ?? AlignmentType.LEFT,
+    spacing: { after: 0, line: 360 },
+  });
+}
+
 type AnnexResultChunk =
   | { kind: 'text'; text: string }
   | { kind: 'annex'; annex: number; title: string; lines: string[] };
@@ -369,7 +407,6 @@ function textToDocxParagraphs(
     return buildPlainParagraphs(text);
   }
 
-  const border = { style: BorderStyle.SINGLE, size: 6, color: "000000" };
   const out: (Paragraph | Table)[] = [];
   parsed.forEach((p) => {
     if (p.kind === 'text') {
@@ -381,26 +418,24 @@ function textToDocxParagraphs(
       new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
         alignment: AlignmentType.CENTER,
+        borders: DOCX_TABLE_BORDERS,
         rows: [
           new TableRow({
             children: [
-              new TableCell({
-                borders: { top: border, bottom: border, left: border, right: border },
-                children: [
-                  new Paragraph({
-                    children: [
-                      new TextRun({
-                        text: p.title,
-                        size: fontSize,
-                        bold: true,
-                        underline: { type: UnderlineType.SINGLE },
-                      } as any),
-                    ],
-                    alignment: AlignmentType.LEFT,
-                    spacing: { after: 0, line: 360 },
-                  }),
-                ],
-              }),
+              docxCell([
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: p.title,
+                      size: fontSize,
+                      bold: true,
+                      underline: { type: UnderlineType.SINGLE },
+                    } as any),
+                  ],
+                  alignment: AlignmentType.LEFT,
+                  spacing: { after: 0, line: 360 },
+                }),
+              ]),
             ],
           }),
         ],
@@ -603,14 +638,14 @@ async function createPhotoRegisterDocxSection(process: ProcessData): Promise<(Pa
               : 160;
             const bytes = dataUrlToUint8Array(loaded.dataUrl);
             const imgRun = new ImageRun({ data: bytes, transformation: { width: targetPxW, height: targetPxH }, type: mediaType });
-            children.push(new Paragraph({ children: [imgRun] }));
+            children.push(new Paragraph({ children: [imgRun], alignment: AlignmentType.CENTER }));
           }
         } catch {}
       }
       const cap = String(p.caption || "").trim();
-      if (cap) children.push(new Paragraph({ children: [new TextRun({ text: cap, size: 24 })] }));
+      if (cap) children.push(new Paragraph({ children: [new TextRun({ text: cap, size: 24 })], alignment: AlignmentType.CENTER }));
     }
-    return new TableCell({ children });
+    return docxCell(children);
   };
 
   for (let i = 0; i < photos.length; i += 2) {
@@ -619,7 +654,7 @@ async function createPhotoRegisterDocxSection(process: ProcessData): Promise<(Pa
     rows.push(new TableRow({ children: [left, right] }));
   }
 
-  elements.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }));
+  elements.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
   return elements;
 }
 
@@ -761,7 +796,7 @@ function createCoverDocxSection(process: ProcessData) {
   const bodyText = `${peritoName}, ${professionalTitle}${registrationNumber ? ", " + registrationNumber : ""}, legalmente habilitado pelo CREA - CONSELHO REGIONAL DE ENGENHARIA, nomeado como PERITO JUDICIAL, vem à presença de V. Exa. apresentar o resultado do seu trabalho consistente do incluso LAUDO PERICIAL e solicitar o arbitramento de seus honorários profissionais em ${honorarios}, corrigidos monetariamente na data de seu efetivo pagamento.`;
 
   const blocks: Paragraph[] = [];
-  blocks.push(new Paragraph({ children: [ new TextRun({ text: courtLine, bold: true, size: 24 }) ], alignment: AlignmentType.CENTER, spacing: { after: 80 } }));
+  blocks.push(new Paragraph({ children: [ new TextRun({ text: courtLine, bold: true, size: 24 }) ], alignment: AlignmentType.CENTER, spacing: { before: cmToTwip(1), after: 80 } }));
   if (processNumber) blocks.push(new Paragraph({ children: [ new TextRun({ text: `Proc...: ${processNumber}`, size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { line: 360, after: 25 } }));
   if (claimantName) blocks.push(new Paragraph({ children: [ new TextRun({ text: `Reclamante: ${claimantName}`, size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { line: 360, after: 25 } }));
   if (defendantName) blocks.push(new Paragraph({ children: [ new TextRun({ text: `Reclamada: ${defendantName}`, size: 24 }) ], alignment: AlignmentType.LEFT, spacing: { line: 360, after: cmToTwip(3) } }));
@@ -887,7 +922,7 @@ async function createInsalubrityResultsSection(process: ProcessData, sectionNumb
                   children.push(new Paragraph({ children: [new TextRun({ text: cap, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 120, line: 360 } }));
                 }
               }
-              return new TableCell({ children });
+              return docxCell(children);
             };
 
             const rows: TableRow[] = [];
@@ -898,7 +933,7 @@ async function createInsalubrityResultsSection(process: ProcessData, sectionNumb
             }
 
             return [
-              new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }),
+              new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }),
               new Paragraph({ spacing: { after: 200 } }),
             ];
           } catch {
@@ -917,73 +952,38 @@ function createAnnexTable() {
       size: 100,
       type: WidthType.PERCENTAGE,
     },
+    borders: DOCX_TABLE_BORDERS,
     rows: [
       new TableRow({
         children: [
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Anexo", bold: true, size: 24 })] })],
-            width: { size: 15, type: WidthType.PERCENTAGE },
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Agente de Risco", bold: true, size: 24 })] })],
-            width: { size: 35, type: WidthType.PERCENTAGE },
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Situação", bold: true, size: 24 })] })],
-            width: { size: 35, type: WidthType.PERCENTAGE },
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Observações", bold: true, size: 24 })] })],
-            width: { size: 15, type: WidthType.PERCENTAGE },
-          }),
+          docxCell([docxCellText("Anexo", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
+          docxCell([docxCellText("Agente de Risco", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+          docxCell([docxCellText("Situação", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+          docxCell([docxCellText("Observações", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Anexo 1", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Ruído contínuo ou intermitente", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Não ocorre exposição", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "----------", size: 24 })] })],
-          }),
+          docxCell([docxCellText("Anexo 1", { alignment: AlignmentType.CENTER })]),
+          docxCell([docxCellText("Ruído contínuo ou intermitente")]),
+          docxCell([docxCellText("Não ocorre exposição", { alignment: AlignmentType.CENTER })]),
+          docxCell([docxCellText("----------", { alignment: AlignmentType.CENTER })]),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Anexo 7", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Radiação não ionizante", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Não ocorre exposição", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "----------", size: 24 })] })],
-          }),
+          docxCell([docxCellText("Anexo 7", { alignment: AlignmentType.CENTER })]),
+          docxCell([docxCellText("Radiação não ionizante")]),
+          docxCell([docxCellText("Não ocorre exposição", { alignment: AlignmentType.CENTER })]),
+          docxCell([docxCellText("----------", { alignment: AlignmentType.CENTER })]),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Anexo 8", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Vibrações", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "Não ocorre exposição", size: 24 })] })],
-          }),
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: "----------", size: 24 })] })],
-          }),
+          docxCell([docxCellText("Anexo 8", { alignment: AlignmentType.CENTER })]),
+          docxCell([docxCellText("Vibrações")]),
+          docxCell([docxCellText("Não ocorre exposição", { alignment: AlignmentType.CENTER })]),
+          docxCell([docxCellText("----------", { alignment: AlignmentType.CENTER })]),
         ],
       }),
     ],
@@ -1198,12 +1198,12 @@ function createWorkplaceCharacteristicsSection(process: ProcessData) {
       blocks.push(new Paragraph({ children: [ new TextRun({ text: specialDesc || 'Não informado', size: 24 }) ], spacing: { after: 300, line: 360 }, alignment: AlignmentType.JUSTIFIED }));
     } else {
       const headers = ["Característica", "Detalhe"];
-  const headerRow = new TableRow({
-      children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: headers[0], bold: true, size: 28 })] })] }) ,
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: headers[1], bold: true, size: 28 })] })] }) ,
-      ],
-    });
+      const headerRow = new TableRow({
+        children: [
+          docxCell([docxCellText(headers[0], { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+          docxCell([docxCellText(headers[1], { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+        ],
+      });
 
       const rows: TableRow[] = [headerRow];
       const joinArr = (arr?: any[]) => Array.isArray(arr) && arr.length ? arr.map((v) => String(v)).join(', ') : '';
@@ -1211,8 +1211,8 @@ function createWorkplaceCharacteristicsSection(process: ProcessData) {
         const valStr = Array.isArray(value) ? joinArr(value) : String(value ?? '').trim();
         if (valStr) {
           rows.push(new TableRow({ children: [
-            new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: label, size: 24 }) ] }) ] }),
-            new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: valStr, size: 24 }) ] }) ] }),
+            docxCell([docxCellText(label)]),
+            docxCell([docxCellText(valStr)]),
           ] }));
         }
       };
@@ -1229,11 +1229,11 @@ function createWorkplaceCharacteristicsSection(process: ProcessData) {
 
       if (rows.length === 1) {
         rows.push(new TableRow({ children: [
-          new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: 'Não informado', size: 24 }) ] }) ] }),
-          new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: '', size: 24 }) ] }) ] }),
+          docxCell([docxCellText('Não informado')]),
+          docxCell([docxCellText('')]),
         ] }));
       }
-      blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }));
+      blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
     }
   } else if (typeof wkcRaw === 'string' && String(wkcRaw).trim()) {
     blocks.push(new Paragraph({ children: [ new TextRun({ text: String(wkcRaw).trim(), size: 24 }) ], spacing: { after: 300, line: 360 }, alignment: AlignmentType.JUSTIFIED }));
@@ -1241,8 +1241,8 @@ function createWorkplaceCharacteristicsSection(process: ProcessData) {
     const headers = ["Característica", "Detalhe"];
     const headerRow = new TableRow({
       children: [
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: headers[0], bold: true, size: 24 }) ] }) ] }) ,
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: headers[1], bold: true, size: 24 }) ] }) ] }) ,
+        docxCell([docxCellText(headers[0], { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+        docxCell([docxCellText(headers[1], { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
       ],
     });
     const rows: TableRow[] = [headerRow];
@@ -1254,17 +1254,17 @@ function createWorkplaceCharacteristicsSection(process: ProcessData) {
           .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as any[]).join(', ') : String(v)}`)
           .join(' | ');
         rows.push(new TableRow({ children: [
-          new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: String(name), size: 24 }) ] }) ] }),
-          new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: details || '', size: 24 }) ] }) ] }),
+          docxCell([docxCellText(String(name))]),
+          docxCell([docxCellText(details || '')]),
         ] }));
       } else {
         rows.push(new TableRow({ children: [
-          new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: `Item ${idx + 1}`, size: 24 }) ] }) ] }),
-          new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: String(item ?? ''), size: 24 }) ] }) ] }),
+          docxCell([docxCellText(`Item ${idx + 1}`)]),
+          docxCell([docxCellText(String(item ?? ''))]),
         ] }));
       }
     });
-    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }));
+    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
   } else {
     blocks.push(new Paragraph({ children: [ new TextRun({ text: 'Não informado', size: 24 }) ] }));
   }
@@ -1402,22 +1402,22 @@ function createAttendeesSection(process: ProcessData) {
 
   const headerRow = new TableRow({
     children: [
-      new TableCell({
-        children: [new Paragraph({ children: [new TextRun({ text: "Nome", bold: true, size: 24 })] })],
-        width: { size: 35, type: WidthType.PERCENTAGE },
-      }),
-      new TableCell({
-        children: [new Paragraph({ children: [new TextRun({ text: "Função", bold: true, size: 24 })] })],
-        width: { size: 25, type: WidthType.PERCENTAGE },
-      }),
-      new TableCell({
-        children: [new Paragraph({ children: [new TextRun({ text: "Empresa", bold: true, size: 24 })] })],
-        width: { size: 20, type: WidthType.PERCENTAGE },
-      }),
-      new TableCell({
-        children: [new Paragraph({ children: [new TextRun({ text: "Observações", bold: true, size: 24 })] })],
-        width: { size: 20, type: WidthType.PERCENTAGE },
-      }),
+      docxCell(
+        [docxCellText("Nome", { bold: true, alignment: AlignmentType.CENTER })],
+        { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }
+      ),
+      docxCell(
+        [docxCellText("Função", { bold: true, alignment: AlignmentType.CENTER })],
+        { header: true, width: { size: 25, type: WidthType.PERCENTAGE } }
+      ),
+      docxCell(
+        [docxCellText("Empresa", { bold: true, alignment: AlignmentType.CENTER })],
+        { header: true, width: { size: 20, type: WidthType.PERCENTAGE } }
+      ),
+      docxCell(
+        [docxCellText("Observações", { bold: true, alignment: AlignmentType.CENTER })],
+        { header: true, width: { size: 20, type: WidthType.PERCENTAGE } }
+      ),
     ],
   });
 
@@ -1428,10 +1428,10 @@ function createAttendeesSection(process: ProcessData) {
       rows.push(
         new TableRow({
           children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(p?.name || p || ''), size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(p?.function || ''), size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(p?.company || ''), size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(p?.obs || ''), size: 24 })] })] }) ,
+            docxCell([docxCellText(String(p?.name || p || ''))]),
+            docxCell([docxCellText(String(p?.function || ''))]),
+            docxCell([docxCellText(String(p?.company || ''))]),
+            docxCell([docxCellText(String(p?.obs || ''))]),
           ],
         })
       );
@@ -1440,10 +1440,10 @@ function createAttendeesSection(process: ProcessData) {
       rows.push(
         new TableRow({
           children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(attendees), size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }) ,
+            docxCell([docxCellText(String(attendees))]),
+            docxCell([docxCellText("")]),
+            docxCell([docxCellText("")]),
+            docxCell([docxCellText("")]),
           ],
         })
       );
@@ -1451,10 +1451,10 @@ function createAttendeesSection(process: ProcessData) {
       rows.push(
         new TableRow({
           children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Não informado", size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }) ,
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }) ,
+            docxCell([docxCellText("Não informado")]),
+            docxCell([docxCellText("")]),
+            docxCell([docxCellText("")]),
+            docxCell([docxCellText("")]),
           ],
         })
       );
@@ -1470,6 +1470,7 @@ function createAttendeesSection(process: ProcessData) {
       width: { size: 100, type: WidthType.PERCENTAGE },
       rows,
       alignment: AlignmentType.CENTER,
+      borders: DOCX_TABLE_BORDERS,
     }),
   ];
 }
@@ -1775,9 +1776,9 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
 
   const headerRow = new TableRow({
     children: [
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Equipamento", bold: true, size: 24 })] })] }),
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Proteção", bold: true, size: 24 })] })] }),
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "CA", bold: true, size: 24 })] })] }),
+      docxCell([docxCellText("Equipamento", { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+      docxCell([docxCellText("Proteção", { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+      docxCell([docxCellText("CA", { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
     ],
   });
 
@@ -1790,26 +1791,26 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       const ca = String(e?.ca ?? '').trim();
       rows.push(new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: equipment, size: 24 })] })] }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: protection, size: 24 })] })] }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ca, size: 24 })] })] }),
+          docxCell([docxCellText(equipment)]),
+          docxCell([docxCellText(protection)]),
+          docxCell([docxCellText(ca)]),
         ],
       }));
     });
   } else if (typeof epis === 'string' && epis.trim()) {
     rows.push(new TableRow({
       children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(epis).trim(), size: 24 })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: '', size: 24 })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: '', size: 24 })] })] }),
+        docxCell([docxCellText(String(epis).trim())]),
+        docxCell([docxCellText('')]),
+        docxCell([docxCellText('')]),
       ],
     }));
   } else {
     rows.push(new TableRow({
       children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Não informado', size: 24 })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: '', size: 24 })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: '', size: 24 })] })] }),
+        docxCell([docxCellText('Não informado')]),
+        docxCell([docxCellText('')]),
+        docxCell([docxCellText('')]),
       ],
     }));
   }
@@ -1821,7 +1822,7 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       spacing: { before: 400, after: 200 },
     }),
     new Paragraph({ children: [new TextRun({ text: introText, size: 24 })], spacing: { after: 200, line: 360 }, alignment: AlignmentType.JUSTIFIED }),
-    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }),
+    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }),
   ];
 
   if (replEnabled) {
@@ -1845,9 +1846,9 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
 
     const replHeaderRow = new TableRow({
       children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Equipamento fornecido", bold: true, size: 24 })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "CA", bold: true, size: 24 })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Data de entrega", bold: true, size: 24 })] })] }),
+        docxCell([docxCellText("Equipamento fornecido", { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+        docxCell([docxCellText("CA", { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
+        docxCell([docxCellText("Data de entrega", { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
       ],
     });
 
@@ -1860,9 +1861,9 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
         replTableRows.push(
           new TableRow({
             children: [
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: equipment, size: 24 })] })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ca, size: 24 })] })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: delivery, size: 24 })] })] }),
+              docxCell([docxCellText(equipment)]),
+              docxCell([docxCellText(ca)]),
+              docxCell([docxCellText(delivery)]),
             ],
           })
         );
@@ -1871,15 +1872,15 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       replTableRows.push(
         new TableRow({
           children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Não informado", size: 24 })] })] }),
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }),
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] })] }),
+            docxCell([docxCellText("Não informado")]),
+            docxCell([docxCellText("")]),
+            docxCell([docxCellText("")]),
           ],
         })
       );
     }
 
-    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: replTableRows, alignment: AlignmentType.CENTER }));
+    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: replTableRows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
 
     if (Array.isArray(usefulLifeItems) && usefulLifeItems.length) {
       blocks.push(
@@ -1902,9 +1903,9 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
 
       const ulHeaderRow = new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "EPI", bold: true, size: 24 })] })], width: { size: 35, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "CA", bold: true, size: 24 })] })], width: { size: 15, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Vida útil estimada", bold: true, size: 24 })] })], width: { size: 50, type: WidthType.PERCENTAGE } }),
+          docxCell([docxCellText("EPI", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+          docxCell([docxCellText("CA", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
+          docxCell([docxCellText("Vida útil estimada", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 50, type: WidthType.PERCENTAGE } }),
         ],
       });
 
@@ -1916,15 +1917,15 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
         ulRows.push(
           new TableRow({
             children: [
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: equipment || "Não informado", size: 24 })] })], width: { size: 35, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ca || "", size: 24 })] })], width: { size: 15, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: life || "", size: 24 })] })], width: { size: 50, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(equipment || "Não informado")], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(ca || "")], { width: { size: 15, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(life || "")], { width: { size: 50, type: WidthType.PERCENTAGE } }),
             ],
           })
         );
       });
 
-      blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: ulRows, alignment: AlignmentType.CENTER }));
+      blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: ulRows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
     }
 
     const deliveryByEquipment = new Map<string, Array<{ ca: string; date: Date }>>();
@@ -2112,12 +2113,30 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
 
       const evHeaderRow = new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "EPI", bold: true, size: 24 })] })], width: { size: 20, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Entregas", bold: true, size: 24 })] })], width: { size: 10, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Intervalo entre entregas", bold: true, size: 24 })] })], width: { size: 18, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Período insuficiente (insalubre)", bold: true, size: 24 })] })], width: { size: 30, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Avaliação", bold: true, size: 24 })] })], width: { size: 12, type: WidthType.PERCENTAGE } }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Base", bold: true, size: 24 })] })], width: { size: 10, type: WidthType.PERCENTAGE } }),
+          docxCell(
+            [docxCellText("EPI", { bold: true, alignment: AlignmentType.CENTER })],
+            { header: true, width: { size: 20, type: WidthType.PERCENTAGE } }
+          ),
+          docxCell(
+            [docxCellText("Entregas", { bold: true, alignment: AlignmentType.CENTER })],
+            { header: true, width: { size: 10, type: WidthType.PERCENTAGE } }
+          ),
+          docxCell(
+            [docxCellText("Intervalo entre entregas", { bold: true, alignment: AlignmentType.CENTER })],
+            { header: true, width: { size: 18, type: WidthType.PERCENTAGE } }
+          ),
+          docxCell(
+            [docxCellText("Período insuficiente (insalubre)", { bold: true, alignment: AlignmentType.CENTER })],
+            { header: true, width: { size: 30, type: WidthType.PERCENTAGE } }
+          ),
+          docxCell(
+            [docxCellText("Avaliação", { bold: true, alignment: AlignmentType.CENTER })],
+            { header: true, width: { size: 12, type: WidthType.PERCENTAGE } }
+          ),
+          docxCell(
+            [docxCellText("Base", { bold: true, alignment: AlignmentType.CENTER })],
+            { header: true, width: { size: 10, type: WidthType.PERCENTAGE } }
+          ),
         ],
       });
 
@@ -2126,18 +2145,18 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
         evRows.push(
           new TableRow({
             children: [
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: it.equipment, size: 24 })] })], width: { size: 20, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(it.deliveries), size: 24 })] })], width: { size: 10, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: it.intervalLabel, size: 24 })] })], width: { size: 18, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: it.insufficientLabel, size: 22 })] })], width: { size: 30, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: it.status, size: 24 })] })], width: { size: 12, type: WidthType.PERCENTAGE } }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: it.basis, size: 22 })] })], width: { size: 10, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(it.equipment)], { width: { size: 20, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(String(it.deliveries))], { width: { size: 10, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(it.intervalLabel)], { width: { size: 18, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(it.insufficientLabel, { size: 22 })], { width: { size: 30, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(it.status)], { width: { size: 12, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(it.basis, { size: 22 })], { width: { size: 10, type: WidthType.PERCENTAGE } }),
             ],
           })
         );
       });
 
-      blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: evRows, alignment: AlignmentType.CENTER }));
+      blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: evRows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
     }
 
     blocks.push(
@@ -2226,20 +2245,20 @@ function createEPCSection(process: ProcessData) {
 
   const headerRow = new TableRow({
     children: [
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'EPC', bold: true, size: 24 })] })] }),
+      docxCell([docxCellText('EPC', { bold: true, alignment: AlignmentType.CENTER })], { header: true }),
     ],
   });
 
   const rows: TableRow[] = items.length
     ? items.map((item) => new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(item), size: 24 })] })] }),
+          docxCell([docxCellText(String(item))]),
         ],
       }))
     : [
         new TableRow({
           children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Não informado', size: 24 })] })] }),
+            docxCell([docxCellText('Não informado')]),
           ],
         }),
       ];
@@ -2250,7 +2269,7 @@ function createEPCSection(process: ProcessData) {
       heading: HeadingLevel.HEADING_1,
       spacing: { before: 400, after: 200 },
     }),
-    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...rows], alignment: AlignmentType.CENTER }),
+    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...rows], alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }),
   ];
 }
 
@@ -2338,10 +2357,10 @@ function createInsalubrityExposuresSection(
   const addTable = (title: string, rows: { annex: string; agent: string; exposure: string; obs: string }[]) => {
     const header = new TableRow({
       children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Anexo", bold: true, size: 24 })] , alignment: AlignmentType.CENTER })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Agente", bold: true, size: 24 })] , alignment: AlignmentType.CENTER })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Exposição", bold: true, size: 24 })] , alignment: AlignmentType.CENTER })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Obs", bold: true, size: 24 })] , alignment: AlignmentType.CENTER })] }),
+        docxCell([docxCellText("Anexo", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText("Agente", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText("Exposição", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText("Obs", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
       ],
     });
 
@@ -2349,20 +2368,20 @@ function createInsalubrityExposuresSection(
       ? rows.map((r) =>
           new TableRow({
             children: [
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `Anexo ${r.annex}`, size: 24 })] , alignment: AlignmentType.CENTER })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: r.agent, size: 24 })] , alignment: AlignmentType.CENTER })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: r.exposure, size: 24 })] , alignment: AlignmentType.CENTER })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: r.obs || "----------", size: 24 })] , alignment: AlignmentType.CENTER })] }),
+              docxCell([docxCellText(`Anexo ${r.annex}`, { alignment: AlignmentType.CENTER })], { width: { size: 15, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(r.agent, { alignment: AlignmentType.CENTER })], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(r.exposure, { alignment: AlignmentType.CENTER })], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText(r.obs || "----------", { alignment: AlignmentType.CENTER })], { width: { size: 15, type: WidthType.PERCENTAGE } }),
             ],
           })
         )
       : [
           new TableRow({
             children: [
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Não informado", size: 24 })] , alignment: AlignmentType.CENTER })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] , alignment: AlignmentType.CENTER })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] , alignment: AlignmentType.CENTER })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "", size: 24 })] , alignment: AlignmentType.CENTER })] }),
+              docxCell([docxCellText("Não informado", { alignment: AlignmentType.CENTER })], { width: { size: 15, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("", { alignment: AlignmentType.CENTER })], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("", { alignment: AlignmentType.CENTER })], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("", { alignment: AlignmentType.CENTER })], { width: { size: 15, type: WidthType.PERCENTAGE } }),
             ],
           }),
         ];
@@ -2370,10 +2389,11 @@ function createInsalubrityExposuresSection(
     blocks.push(
       new Paragraph({
         children: [new TextRun({ text: title, bold: true, size: 28 })],
+        heading: HeadingLevel.HEADING_2,
         spacing: { before: 200, after: 100 },
       })
     );
-    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [header, ...dataRows], alignment: AlignmentType.CENTER }));
+    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [header, ...dataRows], alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
   };
 
   if (hasNR15) {
@@ -2480,24 +2500,24 @@ function createPericulosityAnalysisSection(process: ProcessData) {
   if (rows.length) {
     const header = new TableRow({
       children: [
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: "Anexo", bold: true, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: "Agente", bold: true, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: "Exposição", bold: true, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: "Obs", bold: true, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
+        docxCell([docxCellText("Anexo", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText("Agente", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText("Exposição", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 35, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText("Obs", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
       ],
     });
 
     const dataRows = rows.map((r) => new TableRow({
       children: [
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: `Anexo ${r.annex}`, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: r.agent, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: r.exposure, size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
-        new TableCell({ children: [ new Paragraph({ children: [ new TextRun({ text: r.obs || "----------", size: 24 }) ], alignment: AlignmentType.CENTER }) ] }),
+        docxCell([docxCellText(`Anexo ${r.annex}`, { alignment: AlignmentType.CENTER })], { width: { size: 15, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText(r.agent, { alignment: AlignmentType.CENTER })], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText(r.exposure, { alignment: AlignmentType.CENTER })], { width: { size: 35, type: WidthType.PERCENTAGE } }),
+        docxCell([docxCellText(r.obs || "----------", { alignment: AlignmentType.CENTER })], { width: { size: 15, type: WidthType.PERCENTAGE } }),
       ],
     }));
 
-    blocks.push(new Paragraph({ children: [ new TextRun({ text: "Tabela NR-16 (Anexos e Exposição)", bold: true, size: 24 }) ], spacing: { before: 200, after: 100 } }));
-    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [header, ...dataRows], alignment: AlignmentType.CENTER }));
+    blocks.push(new Paragraph({ children: [ new TextRun({ text: "Tabela NR-16 (Anexos e Exposição)", bold: true, size: 28 }) ], heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 100 } }));
+    blocks.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [header, ...dataRows], alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }));
   }
 
   return blocks;
@@ -2615,7 +2635,7 @@ async function createPericulosityResultsSection(process: ProcessData, sectionNum
                   children.push(new Paragraph({ children: [new TextRun({ text: cap, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 120, line: 360 } }));
                 }
               }
-              return new TableCell({ children });
+          return docxCell(children);
             };
 
             const rows: TableRow[] = [];
@@ -2625,10 +2645,10 @@ async function createPericulosityResultsSection(process: ProcessData, sectionNum
               rows.push(new TableRow({ children: [left, right] }));
             }
 
-            return [
-              new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER }),
-              new Paragraph({ spacing: { after: 200 } }),
-            ];
+        return [
+          new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows, alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }),
+          new Paragraph({ spacing: { after: 200 } }),
+        ];
           } catch {
             return [] as any[];
           }
@@ -2649,7 +2669,7 @@ async function createConclusionSection(process: ProcessData, sectionNumber: numb
     new Paragraph({
       children: [
         new TextRun({
-          text: `${sectionNumber} - CONCLUSÃO`,
+          text: `${sectionNumber}. CONCLUSÃO`,
           bold: true,
           size: 28,
         }),
@@ -2873,7 +2893,7 @@ export async function exportReportAsDocx(
                     children: [new TextRun({ text: "SUMÁRIO", bold: true, size: 28 })],
                     spacing: { before: 200, after: 100 },
                   }),
-                  new TableOfContents("\u00A0", { hyperlink: false, headingStyleRange: "1-7" }),
+                  new TableOfContents("SUMÁRIO", { hyperlink: true, headingStyleRange: "1-7", useAppliedParagraphOutlineLevel: true }),
                   new Paragraph({ spacing: { after: 300 } }),
                 ],
               },
@@ -2970,10 +2990,13 @@ export async function exportReportAsPdf(
     const contentWidth = pageWidth - marginLeft - marginRight;
     
     // Dados do processo
-    const coverData = process.cover_data || {};
-    const peritoName = coverData.peritoName || "ANDERSON DE OLIVEIRA LATALIZA";
-    const professionalTitle = coverData.professionalTitle || "ENGENHEIRO DE SEGURANÇA DO TRABALHO";
-    const registrationNumber = coverData.registrationNumber || "CREA 5063101637";
+    const headerCfg = process.report_config?.header || {};
+    const footerCfg = process.report_config?.footer || {};
+    const signatureCfg = (process.report_config as any)?.signature || {};
+
+    const peritoName = String(headerCfg.peritoName || '').trim() || "PERITO JUDICIAL";
+    const professionalTitle = String(headerCfg.professionalTitle || '').trim() || "ENGENHEIRO CIVIL";
+    const registrationNumber = String(headerCfg.registrationNumber || '').trim() || "CREA";
     
     let currentPage = 0;
     let cursorY = 0;
@@ -3142,10 +3165,7 @@ export async function exportReportAsPdf(
       });
     };
 
-    // Pré-carregar imagens de cabeçalho e rodapé (se configuradas)
-    const headerCfg = process.report_config?.header || {};
-    const footerCfg = process.report_config?.footer || {};
-    const signatureCfg = (process.report_config as any)?.signature || {};
+    const headerFill = headerCfg.fillPage !== false;
 
     let headerImageData: string | undefined;
     let headerImageFormat: 'PNG' | 'JPEG' = 'PNG';
@@ -3158,7 +3178,7 @@ export async function exportReportAsPdf(
         headerImageData = normalized.dataUrl;
         headerImageFormat = 'PNG';
         if (!headerW) {
-          headerW = pageWidth;
+          headerW = headerFill ? pageWidth : contentWidth;
         }
         if (!headerH && headerW) {
           if (normalized.naturalWidth && normalized.naturalHeight) {
@@ -3171,7 +3191,7 @@ export async function exportReportAsPdf(
         // fallback mínimo caso normalização falhe
         headerImageData = headerCfg.imageDataUrl;
         headerImageFormat = headerCfg.imageDataUrl.includes('image/jpeg') || headerCfg.imageDataUrl.includes('jpg') ? 'JPEG' : 'PNG';
-        if (!headerW) headerW = pageWidth;
+        if (!headerW) headerW = headerFill ? pageWidth : contentWidth;
         if (!headerH && headerW) headerH = 40;
       }
     } else if (headerCfg.imageUrl && String(headerCfg.imageUrl).trim().length > 0) {
@@ -3180,7 +3200,7 @@ export async function exportReportAsPdf(
         headerImageData = loaded.dataUrl;
         headerImageFormat = loaded.format;
         if (!headerW) {
-          headerW = pageWidth; // usar largura total por padrão
+          headerW = headerFill ? pageWidth : contentWidth;
         }
         if (!headerH && headerW) {
           if (loaded.naturalWidth && loaded.naturalHeight) {
@@ -3190,6 +3210,30 @@ export async function exportReportAsPdf(
           }
         }
       } catch {}
+    }
+
+    if (headerImageData) {
+      if (headerFill) {
+        headerW = pageWidth;
+        headerH = cmToPt(3.04);
+      } else if (headerW) {
+        const maxW = contentWidth;
+        const maxH = 90;
+        let w = headerW;
+        let h = headerH || 40;
+        if (w > maxW) {
+          const scale = maxW / w;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        if (h > maxH) {
+          const scale = maxH / h;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        headerW = Math.max(1, w);
+        headerH = Math.max(1, h);
+      }
     }
 
     // Declarar variáveis da assinatura (independente de rodapé)
@@ -3234,8 +3278,6 @@ export async function exportReportAsPdf(
       } catch {}
     }
 
-    const headerFill = !!headerCfg.fillPage;
-
     // Rodapé com imagem (configuração semelhante ao cabeçalho)
     let footerImageData: string | undefined;
     let footerImageFormat: 'PNG' | 'JPEG' = 'PNG';
@@ -3243,6 +3285,7 @@ export async function exportReportAsPdf(
     let footerH: number | undefined = (footerCfg.imageHeight as any) != null ? Number(footerCfg.imageHeight as any) : undefined;
     const footerAlign: 'left' | 'center' | 'right' = footerCfg.imageAlign || 'left';
     const footerFill = footerCfg.fillPage !== false;
+    const footerGap = footerFill ? 0 : 10;
 
     if (footerCfg.imageDataUrl && String(footerCfg.imageDataUrl).trim().length > 10) {
       try {
@@ -3250,7 +3293,7 @@ export async function exportReportAsPdf(
         footerImageData = normalized.dataUrl;
         footerImageFormat = 'PNG';
         if (!footerW) {
-          footerW = pageWidth;
+          footerW = footerFill ? pageWidth : contentWidth;
         }
         if (!footerH && footerW) {
           if (normalized.naturalWidth && normalized.naturalHeight) {
@@ -3262,7 +3305,7 @@ export async function exportReportAsPdf(
       } catch {
         footerImageData = footerCfg.imageDataUrl;
         footerImageFormat = footerCfg.imageDataUrl.includes('image/jpeg') || footerCfg.imageDataUrl.includes('jpg') ? 'JPEG' : 'PNG';
-        if (!footerW) footerW = pageWidth;
+        if (!footerW) footerW = footerFill ? pageWidth : contentWidth;
         if (!footerH && footerW) footerH = 40;
       }
     } else if (footerCfg.imageUrl && String(footerCfg.imageUrl).trim().length > 0) {
@@ -3271,7 +3314,7 @@ export async function exportReportAsPdf(
         footerImageData = loaded.dataUrl;
         footerImageFormat = loaded.format;
         if (!footerW) {
-          footerW = pageWidth;
+          footerW = footerFill ? pageWidth : contentWidth;
         }
         if (!footerH && footerW) {
           if (loaded.naturalWidth && loaded.naturalHeight) {
@@ -3283,15 +3326,35 @@ export async function exportReportAsPdf(
       } catch {}
     }
 
+    if (footerImageData) {
+      if (footerFill) {
+        footerW = pageWidth;
+        footerH = cmToPt(3.04);
+      } else if (footerW) {
+        const maxW = contentWidth;
+        const maxH = 90;
+        let w = footerW;
+        let h = footerH || 40;
+        if (w > maxW) {
+          const scale = maxW / w;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        if (h > maxH) {
+          const scale = maxH / h;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        footerW = Math.max(1, w);
+        footerH = Math.max(1, h);
+      }
+    }
+
+    const hasHeaderText = !!(headerCfg.customText || headerCfg.peritoName || headerCfg.professionalTitle || headerCfg.registrationNumber);
+
     const renderHeaderFooterImages = () => {
       // Cabeçalho
       if (headerImageData && headerW && (headerH || 40)) {
-        // Só preencher largura total quando explicitamente configurado
-        if (headerFill && headerW < pageWidth) {
-          const scale = pageWidth / headerW;
-          headerW = pageWidth;
-          headerH = Math.round((headerH || 40) * scale);
-        }
         const h = headerH || 40;
         let x = headerFill ? 0 : marginLeft;
         if (!headerFill) {
@@ -3300,12 +3363,6 @@ export async function exportReportAsPdf(
           } else if (headerAlign === 'right') {
             x = pageWidth - marginRight - headerW;
           }
-        } else {
-          if (headerAlign === 'center') {
-            x = (pageWidth - headerW) / 2;
-          } else if (headerAlign === 'right') {
-            x = pageWidth - headerW;
-          }
         }
         const y = 0; // remover espaçamento superior para evitar linha visível
         try {
@@ -3313,7 +3370,6 @@ export async function exportReportAsPdf(
         } catch {}
       } else {
         // Fallback textual de cabeçalho quando não há imagem
-        const hasHeaderText = !!(headerCfg.customText || headerCfg.peritoName || headerCfg.professionalTitle || headerCfg.registrationNumber);
         if (hasHeaderText) {
           try {
             const line1 = headerCfg.customText || headerCfg.peritoName || '';
@@ -3347,20 +3403,12 @@ export async function exportReportAsPdf(
               doc.setFont('helvetica', 'normal');
               doc.text(line2, x, yBase + 6);
             }
-            console.log('✓ Cabeçalho textual renderizado');
-          } catch (error) {
-            console.error('✗ Erro ao renderizar cabeçalho textual:', error);
-          }
+          } catch {}
         }
       }
       
       // Rodapé
       if (footerImageData && footerW && (footerH || 40)) {
-        if (footerFill && footerW < pageWidth) {
-          const scale = pageWidth / footerW;
-          footerW = pageWidth;
-          footerH = Math.round((footerH || 40) * scale);
-        }
         const h = footerH || 40;
         let x = footerFill ? 0 : marginLeft;
         if (!footerFill) {
@@ -3368,12 +3416,6 @@ export async function exportReportAsPdf(
             x = (pageWidth - footerW) / 2;
           } else if (footerAlign === 'right') {
             x = pageWidth - marginRight - footerW;
-          }
-        } else {
-          if (footerAlign === 'center') {
-            x = (pageWidth - footerW) / 2;
-          } else if (footerAlign === 'right') {
-            x = pageWidth - footerW;
           }
         }
         const y = pageHeight - h;
@@ -3423,9 +3465,10 @@ export async function exportReportAsPdf(
       renderHeaderFooterImages();
       // Garantir que o conteúdo não sobreponha o cabeçalho
       const headerY = 0;
-      const headerRenderedHeight = headerImageData ? (headerH || 40) : 0;
-      const spacingBelow = (headerCfg as any).spacingBelow != null ? Number((headerCfg as any).spacingBelow) : 30;
-      const afterHeaderY = headerY + headerRenderedHeight + spacingBelow;
+      const headerRenderedHeight = headerImageData ? (headerH || 40) : (hasHeaderText ? 40 : 0);
+      const spacingBelow = headerFill ? 0 : ((headerCfg as any).spacingBelow != null ? Number((headerCfg as any).spacingBelow) : 30);
+      const baselinePadding = headerFill ? 12 : 0;
+      const afterHeaderY = headerY + headerRenderedHeight + spacingBelow + baselinePadding;
       cursorY = Math.max(cursorY, afterHeaderY);
     };
 
@@ -3460,7 +3503,7 @@ export async function exportReportAsPdf(
         }
         const lines = wrapText(raw, Math.floor(contentWidth / (fontSize * 0.6)));
         for (const line of lines) {
-          const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+          const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
           if (cursorY > pageHeight - reservedBottom) {
             addPage();
           }
@@ -3497,7 +3540,7 @@ export async function exportReportAsPdf(
 
         const lines = doc.splitTextToSize(block.trimEnd(), effectiveWidth);
         lines.forEach((line, idx) => {
-          const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+          const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
           if (cursorY > pageHeight - reservedBottom) {
             addPage();
           }
@@ -3575,7 +3618,7 @@ export async function exportReportAsPdf(
         }
         const wrapped = wrapText(sanitizeLegalText(line), maxChars);
         for (const w of wrapped) {
-          const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+          const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
           if (cursorY > pageHeight - reservedBottom) {
             addPage();
           }
@@ -3602,7 +3645,7 @@ export async function exportReportAsPdf(
           return;
         }
 
-        const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+        const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
         const boxPaddingX = 4;
         const boxPaddingY = 3;
         const boxH = fontSize + boxPaddingY * 2 + 2;
@@ -3648,7 +3691,7 @@ export async function exportReportAsPdf(
       const lines = doc.splitTextToSize(cleanBody, widthBody);
 
       lines.forEach((line, idx) => {
-        const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+        const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
         if (cursorY > pageHeight - reservedBottom) {
           addPage();
         }
@@ -3699,7 +3742,7 @@ export async function exportReportAsPdf(
       rows: Array<{ [key: string]: string }>,
       columnRatios: number[] = []
     ) => {
-      const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+      const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
       const tableWidth = contentWidth;
       const startX = marginLeft;
       const cellPadding = 4;
@@ -3806,7 +3849,7 @@ export async function exportReportAsPdf(
     // Renderizar imagens na primeira página (já desenhadas no addPage)
     
     // Cabeçalho da capa: só exibe texto se NÃO houver imagem de cabeçalho
-    const suppressPeritoText = !!headerImageData;
+    const suppressPeritoText = !!headerImageData || hasHeaderText;
     if (!suppressPeritoText) {
       addText(peritoName, 16, true, 'center');
       addText(professionalTitle, 12, false, 'center');
@@ -3843,7 +3886,8 @@ export async function exportReportAsPdf(
     cursorY += 30;
     
     // Texto da capa
-    const coverText = `${peritoName}, Engenheiro de Segurança do Trabalho, CREA nº ${registrationNumber}, LEGALMENTE HABILITADO e COMPROMISSADO, nomeado por Vossa Excelência nos autos do processo acima epigrafado, vem mui respeitosamente à presença de V. Exa. apresentar o resultado do seu trabalho consistente do incluso LAUDO PERICIAL, e solicitar o aferimento de seus honorários profissionais em 03 (três) salários mínimos, consoante monetariamente na data de seu efetivo pagamento.`;
+    const idLine = `${peritoName}, ${professionalTitle}${registrationNumber ? ", " + registrationNumber : ""}`;
+    const coverText = `${idLine}, LEGALMENTE HABILITADO e COMPROMISSADO, nomeado por Vossa Excelência nos autos do processo acima epigrafado, vem mui respeitosamente à presença de V. Exa. apresentar o resultado do seu trabalho consistente do incluso LAUDO PERICIAL, e solicitar o aferimento de seus honorários profissionais em 03 (três) salários mínimos, consoante monetariamente na data de seu efetivo pagamento.`;
     
     addParagraphJustified(coverText, 12);
     
@@ -3868,7 +3912,7 @@ export async function exportReportAsPdf(
     cursorY += 10;
     addText("_________________________________", 12, false, 'center');
     addText(peritoName, 12, true, 'center');
-    addText("Eng. de Segurança do Trabalho", 12, false, 'center');
+    addText(professionalTitle, 12, false, 'center');
     addText(registrationNumber, 12, false, 'center');
     
     cursorY += 40;
@@ -4271,7 +4315,7 @@ export async function exportReportAsPdf(
               const normalized = await normalizeDataUrlToPng(loaded.dataUrl);
               const w = maxW;
               const h = normalized.naturalWidth && normalized.naturalHeight ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth)) : Math.round(w * 0.6);
-              const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+              const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
               if (rowStartY + h + 40 > pageHeight - reservedBottom) {
                 addPage();
                 rowStartY = cursorY;
@@ -4884,10 +4928,21 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
       const rc = parseRc((process as any).report_config);
       const tables = rc?.analysis_tables || {};
       const flags = rc?.flags || {};
-      const showNR15 = !!flags?.include_nr15_item15_table;
-      const showNR16 = !!flags?.include_nr16_item15_table;
       const nr15Tables = Array.isArray(tables?.nr15) ? tables.nr15 : [];
       const nr16Tables = Array.isArray(tables?.nr16) ? tables.nr16 : [];
+
+      const normalizeExposure = (v: any) => String(v || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const autoShowNR15 = nr15Tables.some((r: any) => {
+        const exp = normalizeExposure(r?.exposure);
+        return exp === "em analise" || exp === "ocorre exposicao";
+      });
+      const autoShowNR16 = nr16Tables.some((r: any) => {
+        const exp = normalizeExposure(r?.exposure);
+        return exp === "em analise" || exp === "ocorre exposicao";
+      });
+
+      const showNR15 = !!flags?.include_nr15_item15_table || autoShowNR15;
+      const showNR16 = !!flags?.include_nr16_item15_table || autoShowNR16;
       const insaRows = nr15Tables.length ? nr15Tables.map((r: any) => ({ annex: String(r.annex), agent: String(r.agent), exposure: String(r.exposure || ""), obs: String(r.obs || "") })) : parseRows(String(insalubrity));
       const pericuText = String((process as any).periculosity_analysis || "").trim();
       const pericuRows = nr16Tables.length ? nr16Tables.map((r: any) => ({ annex: String(r.annex), agent: String(r.agent), exposure: String(r.exposure || ""), obs: String(r.obs || "") })) : parseRows(pericuText);
@@ -4963,7 +5018,7 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
               const h = normalized.naturalWidth && normalized.naturalHeight
                 ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth))
                 : Math.round(w * 0.6);
-              const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+              const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
               if (rowStartY + h + 40 > pageHeight - reservedBottom) {
                 addPage();
                 rowStartY = cursorY;
@@ -5063,7 +5118,7 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
               const h = normalized.naturalWidth && normalized.naturalHeight
                 ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth))
                 : Math.round(w * 0.6);
-              const reservedBottom = footerImageData ? ((footerH || 40) + 10) : 100;
+              const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
               if (rowStartY + h + 40 > pageHeight - reservedBottom) {
                 addPage();
                 rowStartY = cursorY;
@@ -5238,7 +5293,7 @@ function createQuestionnairesSection(process: ProcessData, sectionNumber: number
   console.log("[DEBUG Quesitos DOCX] hasDefendant:", hasDefendant);
 
   const blocks: Paragraph[] = [];
-  blocks.push(new Paragraph({ children: [ new TextRun({ text: `${sectionNumber} - QUESITOS DA PERÍCIA`, bold: true, size: 28 }) ], heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }));
+  blocks.push(new Paragraph({ children: [ new TextRun({ text: `${sectionNumber}. QUESITOS DA PERÍCIA`, bold: true, size: 28 }) ], heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }));
 
   const sanitize = (t: string) => {
     let s = String(t || "");

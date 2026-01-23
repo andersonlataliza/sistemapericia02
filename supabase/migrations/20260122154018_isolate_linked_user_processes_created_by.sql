@@ -67,18 +67,18 @@ AFTER INSERT ON public.processes
 FOR EACH ROW
 EXECUTE FUNCTION public.grant_linked_users_access_on_process_insert();
 
-DROP POLICY IF EXISTS "Linked users can view accessible processes" ON public.processes;
 DROP POLICY IF EXISTS "Linked users can view own created processes" ON public.processes;
-CREATE POLICY "Linked users can view own created processes" ON public.processes
+DROP POLICY IF EXISTS "Linked users can view accessible processes" ON public.processes;
+CREATE POLICY "Linked users can view accessible processes" ON public.processes
   FOR SELECT USING (
     EXISTS (
       SELECT 1
-      FROM public.linked_users lu
-      WHERE lu.auth_user_id = auth.uid()
-        AND lu.owner_user_id = processes.user_id
+      FROM public.process_access pa
+      INNER JOIN public.linked_users lu ON lu.id = pa.linked_user_id
+      WHERE pa.process_id = processes.id
+        AND lu.auth_user_id = auth.uid()
         AND lu.status = 'active'
     )
-    AND processes.created_by = auth.uid()
   );
 
 DROP POLICY IF EXISTS "Linked users can view their process access" ON public.process_access;
@@ -90,12 +90,6 @@ CREATE POLICY "Linked users can view their process access" ON public.process_acc
       WHERE lu.id = process_access.linked_user_id
         AND lu.auth_user_id = auth.uid()
         AND lu.status = 'active'
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM public.processes p
-      WHERE p.id = process_access.process_id
-        AND p.created_by = auth.uid()
     )
   );
 

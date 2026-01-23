@@ -32,9 +32,10 @@ const App = () => {
   const [profileLoading, setProfileLoading] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
+  const [isLinkedUserDb, setIsLinkedUserDb] = useState(false);
 
   const isBlockedEffective = isBlocked && !isAdminUser;
-  const isLinkedUser = Boolean((session?.user as any)?.user_metadata?.is_linked);
+  const isLinkedUser = Boolean((session?.user as any)?.user_metadata?.is_linked) || isLinkedUserDb;
 
   const loginRedirect = () => {
     try {
@@ -66,6 +67,7 @@ const App = () => {
         setIsBlocked(false);
         setIsAdminUser(false);
         setProfileLoading(false);
+        setIsLinkedUserDb(false);
         return;
       }
 
@@ -94,6 +96,31 @@ const App = () => {
     };
 
     loadBlockStatus();
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    const loadLinked = async () => {
+      if (!session?.user?.id) {
+        setIsLinkedUserDb(false);
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from("linked_users")
+          .select("id")
+          .eq("auth_user_id", session.user.id)
+          .eq("status", "active")
+          .limit(1);
+        if (error) {
+          setIsLinkedUserDb(false);
+          return;
+        }
+        setIsLinkedUserDb(Boolean(data && data.length > 0));
+      } catch {
+        setIsLinkedUserDb(false);
+      }
+    };
+    loadLinked();
   }, [session?.user?.id]);
 
   if (loading || profileLoading) {
@@ -170,7 +197,13 @@ const App = () => {
               />
               <Route
                 path="/configuracao-relatorio"
-                element={session ? (isBlockedEffective ? <Navigate to="/bloqueado" /> : <ReportConfigPage />) : <Navigate to={loginRedirect()} />}
+                element={
+                  session
+                    ? (isBlockedEffective
+                        ? <Navigate to="/bloqueado" />
+                        : (isLinkedUser ? <Navigate to="/dashboard" /> : <ReportConfigPage />))
+                    : <Navigate to={loginRedirect()} />
+                }
               />
               <Route
                 path="/material-consulta"

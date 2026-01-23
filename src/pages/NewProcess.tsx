@@ -25,6 +25,7 @@ export default function NewProcess() {
   const [defendantName, setDefendantName] = useState("");
   const [court, setCourt] = useState("");
   const [distributionDate, setDistributionDate] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [inspectionDate, setInspectionDate] = useState<Date>();
   const [inspectionAddress, setInspectionAddress] = useState("");
   const [city, setCity] = useState("");
@@ -306,6 +307,7 @@ export default function NewProcess() {
         defendant_name: sanitizeLawyerFromName(defendantName),
         court,
         distribution_date: normalizeDateOnly(distributionDate),
+        delivery_date: normalizeDateOnly(deliveryDate),
         inspection_date: normalizeIsoDateTime(inspectionDate),
         inspection_address: inspectionAddress,
         inspection_city: city,
@@ -528,6 +530,16 @@ export default function NewProcess() {
                     type="date"
                     value={distributionDate}
                     onChange={(e) => setDistributionDate(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="deliveryDate">Data máxima de entrega do laudo</Label>
+                  <Input
+                    id="deliveryDate"
+                    type="date"
+                    value={deliveryDate}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
                   />
                 </div>
 

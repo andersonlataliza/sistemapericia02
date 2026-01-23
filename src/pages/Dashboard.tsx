@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FileText, Clock, CheckCircle, AlertCircle, Eye, TrendingUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [loading, setLoading] = useState(true);
   const [isLinkedUser, setIsLinkedUser] = useState(false);
+  const [overdueCount, setOverdueCount] = useState(0);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { statistics, loading: statsLoading, refetch: refetchStats } = useProcessStatistics();
@@ -105,6 +107,39 @@ const saveEdit = async () => {
   }
 };
 
+  const parseDateOnlyToLocal = (dateOnly: string | null): Date | null => {
+    if (!dateOnly) return null;
+    const s = String(dateOnly).trim();
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mon = Number(m[2]);
+    const d = Number(m[3]);
+    if (!y || !mon || !d) return null;
+    const dt = new Date(y, mon - 1, d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt;
+  };
+
+  const todayYmdLocal = (): string => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const isOverdue = (p: Process): boolean => {
+    if (!p.delivery_date) return false;
+    const status = String(p.status || "pending");
+    if (status === "completed" || status === "cancelled") return false;
+    const due = parseDateOnlyToLocal(p.delivery_date);
+    if (!due) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today.getTime() > due.getTime();
+  };
+
   useEffect(() => {
     fetchProcesses();
   }, []);
@@ -158,6 +193,19 @@ const saveEdit = async () => {
         );
       };
 
+      const isMissingDeliveryDateError = (e: any) => {
+        const msg = String(e?.message || "");
+        const details = String(e?.details || "");
+        const hint = String(e?.hint || "");
+        const code = String(e?.code || "");
+        const raw = `${msg} ${details} ${hint}`.toLowerCase();
+        return (
+          code === "42703" ||
+          code === "PGRST204" ||
+          raw.includes("delivery_date") && (raw.includes("does not exist") || raw.includes("undefined column") || raw.includes("could not find"))
+        );
+      };
+
       let listData: any[] | null = null;
       let listError: any = null;
       if (isLinked) {
@@ -192,6 +240,32 @@ const saveEdit = async () => {
       if (listError) throw listError;
 
       setProcesses((listData || []) as any);
+
+      try {
+        const base = supabase
+          .from("processes")
+          .select("id", { count: "exact", head: true });
+        const res = isLinked
+          ? await base
+              .eq("created_by", user.id)
+              .not("delivery_date", "is", null)
+              .lt("delivery_date", todayYmdLocal())
+              .neq("status", "completed")
+              .neq("status", "cancelled")
+          : await base
+              .eq("user_id", user.id)
+              .not("delivery_date", "is", null)
+              .lt("delivery_date", todayYmdLocal())
+              .neq("status", "completed")
+              .neq("status", "cancelled");
+        if (res.error && isMissingDeliveryDateError(res.error)) {
+          setOverdueCount(0);
+        } else {
+          setOverdueCount(Number(res.count || 0));
+        }
+      } catch {
+        setOverdueCount(0);
+      }
       
       // Recarregar estatísticas após buscar processos
       refetchStats();
@@ -220,6 +294,12 @@ const saveEdit = async () => {
     return new Date(dateString).toLocaleDateString("pt-BR");
   };
 
+  const formatDateOnly = (dateOnly: string | null) => {
+    const d = parseDateOnlyToLocal(dateOnly);
+    if (!d) return "";
+    return d.toLocaleDateString("pt-BR");
+  };
+
   if (loading || statsLoading) {
     return (
       <div className="min-h-screen bg-background">
@@ -241,6 +321,16 @@ const saveEdit = async () => {
             Visão geral dos seus processos e perícias
           </p>
         </div>
+
+        {overdueCount > 0 && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Laudo em atraso</AlertTitle>
+            <AlertDescription>
+              {overdueCount} processo(s) com data máxima de entrega vencida.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatsCard title="Total de Processos" value={statistics?.total || 0} icon={FileText} />
@@ -360,6 +450,11 @@ const saveEdit = async () => {
                                 Vinculado
                               </Badge>
                             )}
+                            {isOverdue(process) && (
+                              <Badge variant="destructive" className="text-xs">
+                                Atrasado
+                              </Badge>
+                            )}
                           </div>
                           <p className="text-sm text-muted-foreground">
                             {process.claimant_name} vs {process.defendant_name}
@@ -367,6 +462,11 @@ const saveEdit = async () => {
                           <p className="text-xs text-muted-foreground">
                             Perícia: {formatDate(process.inspection_date)}
                           </p>
+                          {process.delivery_date ? (
+                            <p className="text-xs text-muted-foreground">
+                              Entrega até: {formatDateOnly(process.delivery_date)}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex items-center space-x-3">
                           {getStatusBadge(process.status)}

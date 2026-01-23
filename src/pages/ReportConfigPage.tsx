@@ -8,6 +8,7 @@ import { supabase, getAuthenticatedUser } from "@/integrations/supabase/client";
 import ReportConfigSection, { ReportConfig } from "@/components/laudo/ReportConfigSection";
 import { Input } from "@/components/ui/input";
 import { X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 type ProcessLite = {
   id: string;
@@ -32,6 +33,7 @@ const safeParseJson = <T,>(value: unknown, fallback: T): T => {
 
 export default function ReportConfigPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   
   const [config, setConfig] = useState<ReportConfig>({
@@ -77,6 +79,25 @@ export default function ReportConfigPage() {
         if (!user) {
           setLoading(false);
           return;
+        }
+
+        try {
+          const { data: linkedAccess, error: linkedError } = await supabase
+            .from("linked_users")
+            .select("id")
+            .eq("auth_user_id", user.id)
+            .eq("status", "active")
+            .limit(1);
+          if (!linkedError && linkedAccess && linkedAccess.length > 0) {
+            toast({
+              title: "Somente proprietário",
+              description: "Usuário vinculado não acessa configurações do relatório.",
+              variant: "destructive",
+            });
+            navigate("/dashboard");
+            return;
+          }
+        } catch {
         }
 
         const { data: own, error: ownErr } = await supabase

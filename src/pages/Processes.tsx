@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useState, useMemo } from "react";
 import { supabase, getAuthenticatedUser } from "@/integrations/supabase/client";
-import type { Tables, Database } from "@/integrations/supabase/types";
+import type { Tables } from "@/integrations/supabase/types";
 import Navbar from "@/components/layout/Navbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Eye, Search, Plus, Save, Wallet, CalendarDays, FileText, StickyNote, Filter, X, Trash2, Loader2 } from "lucide-react";
+import { Eye, Search, Plus, Save, Filter, X, Trash2, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -44,24 +42,6 @@ type Process = Tables<'processes'> & {
   _linked_permissions?: unknown;
 };
 
-const canViewPaymentForProcess = (p: Process): boolean => {
-  if (!p?._is_linked) return true;
-  const perms = (p as any)?._linked_permissions as any;
-  return Boolean(perms?.view_payment);
-};
-
-const canEditPaymentForProcess = (p: Process): boolean => {
-  return !p?._is_linked;
-};
-
-interface PaymentDraft {
-  payment_status: string;
-  payment_amount: number;
-  payment_date: string;
-  payment_due_date: string;
-  payment_notes: string;
-}
-
 export default function Processes() {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [filteredProcesses, setFilteredProcesses] = useState<Process[]>([]);
@@ -75,11 +55,8 @@ export default function Processes() {
   const [advancedFilters, setAdvancedFilters] = useState({
     status: "",
     court: "",
-    payment_status: "",
     date_from: "",
     date_to: "",
-    value_min: "",
-    value_max: ""
   });
   
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,21 +67,6 @@ export default function Processes() {
     court: "",
     inspection_date: "",
     status: "pending",
-    determined_value: 0,
-    payment_status: "pending",
-    payment_amount: 0,
-    payment_date: "",
-    payment_notes: "",
-    payment_due_date: "",
-  });
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentTargetId, setPaymentTargetId] = useState<string | null>(null);
-  const [paymentDraft, setPaymentDraft] = useState<PaymentDraft>({
-    payment_status: "pending",
-    payment_amount: 0,
-    payment_date: "",
-    payment_due_date: "",
-    payment_notes: "",
   });
   const [statusTab, setStatusTab] = useState<"pending" | "in_progress" | "completed">("in_progress");
   const [selectedCourts, setSelectedCourts] = useState<string[]>([]);
@@ -152,14 +114,9 @@ export default function Processes() {
     return arr;
   }, [courts, courtUsage, courtCounts]);
 
-  const anyPaymentVisible = useMemo(() => {
-    return processes.some((p) => canViewPaymentForProcess(p));
-  }, [processes]);
-
   const hasActiveFilters = useCallback(() => {
-    const effective = anyPaymentVisible ? advancedFilters : { ...advancedFilters, payment_status: "" };
-    return Object.values(effective).some(value => value !== "") || selectedCourts.length > 0;
-  }, [advancedFilters, anyPaymentVisible, selectedCourts.length]);
+    return Object.values(advancedFilters).some(value => value !== "") || selectedCourts.length > 0;
+  }, [advancedFilters, selectedCourts.length]);
 
   const performAdvancedSearch = useCallback(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -174,11 +131,6 @@ export default function Processes() {
     const createdFrom = parseDateOnly(advancedFilters.date_from);
     const createdTo = parseDateOnly(advancedFilters.date_to);
     if (createdTo) createdTo.setHours(23, 59, 59, 999);
-
-    const valueMin = advancedFilters.value_min ? Number(String(advancedFilters.value_min).replace(',', '.')) : null;
-    const valueMax = advancedFilters.value_max ? Number(String(advancedFilters.value_max).replace(',', '.')) : null;
-    const hasValueMin = typeof valueMin === 'number' && !Number.isNaN(valueMin);
-    const hasValueMax = typeof valueMax === 'number' && !Number.isNaN(valueMax);
 
     const selectedCourtsNormalized = selectedCourts.map((c) => c.toLowerCase());
     const courtText = advancedFilters.court.trim().toLowerCase();
@@ -209,45 +161,31 @@ export default function Processes() {
           status === filterStatus ||
           (filterStatus === 'in_progress' && status === 'active');
 
-        const effectivePaymentFilter = anyPaymentVisible ? advancedFilters.payment_status : "";
-        const paymentStatus = canViewPaymentForProcess(p) ? String(p.payment_status || '') : '';
-        const matchesPayment = !effectivePaymentFilter || paymentStatus === effectivePaymentFilter;
-
         const createdAt = parseDateOnly(p.created_at);
         const matchesCreatedFrom = !createdFrom || (createdAt != null && createdAt >= createdFrom);
         const matchesCreatedTo = !createdTo || (createdAt != null && createdAt <= createdTo);
-
-        const determinedValue = typeof p.determined_value === 'number' ? p.determined_value : 0;
-        const matchesValueMin = !hasValueMin || (!Number.isNaN(determinedValue) && determinedValue >= (valueMin as number));
-        const matchesValueMax = !hasValueMax || (!Number.isNaN(determinedValue) && determinedValue <= (valueMax as number));
 
         return (
           matchesTerm &&
           matchesCourtText &&
           matchesCourtPick &&
           matchesStatus &&
-          matchesPayment &&
           matchesCreatedFrom &&
-          matchesCreatedTo &&
-          matchesValueMin &&
-          matchesValueMax
+          matchesCreatedTo
         );
       })
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
 
     setFilteredProcesses(filtered);
-  }, [advancedFilters, anyPaymentVisible, processes, searchTerm, selectedCourts]);
+  }, [advancedFilters, processes, searchTerm, selectedCourts]);
 
   const clearFilters = () => {
     setSearchTerm("");
     setAdvancedFilters({
       status: "",
       court: "",
-      payment_status: "",
       date_from: "",
       date_to: "",
-      value_min: "",
-      value_max: ""
     });
     setShowAdvancedSearch(false);
     setSelectedCourts([]);
@@ -379,63 +317,7 @@ export default function Processes() {
       court: p.court || "",
       inspection_date: p.inspection_date ? new Date(p.inspection_date).toISOString().slice(0, 10) : "",
       status: p.status,
-      determined_value: p.determined_value || 0,
-      payment_status: canViewPaymentForProcess(p) ? (p.payment_status || "pending") : "pending",
-      payment_amount: canViewPaymentForProcess(p) ? (p.payment_amount || 0) : 0,
-      payment_date: canViewPaymentForProcess(p) && p.payment_date ? new Date(p.payment_date).toISOString().slice(0, 10) : "",
-      payment_notes: canViewPaymentForProcess(p) ? (p.payment_notes || "") : "",
-      payment_due_date: canViewPaymentForProcess(p) ? (p.payment_due_date || "") : "",
     });
-  };
-
-  const openPayment = (p: Process) => {
-    if (!canEditPaymentForProcess(p)) return;
-    setPaymentTargetId(p.id);
-    setPaymentDraft({
-      payment_status: p.payment_status || "pending",
-      payment_amount: p.payment_amount || 0,
-      payment_date: p.payment_date ? new Date(p.payment_date).toISOString().slice(0, 10) : "",
-      payment_due_date: p.payment_due_date || "",
-      payment_notes: p.payment_notes || "",
-    });
-    setPaymentDialogOpen(true);
-  };
-
-  const savePayment = async () => {
-    if (!paymentTargetId) return;
-
-    const updatePayload: Database['public']['Tables']['processes']['Update'] = {
-      payment_status: paymentDraft.payment_status,
-      payment_amount: paymentDraft.payment_amount,
-      payment_date: paymentDraft.payment_date ? new Date(paymentDraft.payment_date).toISOString() : null,
-      payment_due_date: paymentDraft.payment_due_date || null,
-      payment_notes: paymentDraft.payment_notes,
-    };
-
-    const { error } = await supabase
-      .from("processes")
-      .update(updatePayload)
-      .eq("id", paymentTargetId);
-
-    if (error) {
-      toast({
-        title: "Erro ao salvar pagamento",
-        description: (error as { message?: string })?.message || "Não foi possível atualizar o pagamento",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setProcesses((prev) => prev.map((p) => (p.id === paymentTargetId ? { ...p, ...updatePayload } : p)));
-    setFilteredProcesses((prev) => prev.map((p) => (p.id === paymentTargetId ? { ...p, ...updatePayload } : p)));
-
-    toast({
-      title: "Pagamento atualizado",
-      description: "Status e valores salvos com sucesso.",
-    });
-
-    setPaymentDialogOpen(false);
-    setPaymentTargetId(null);
   };
 
   const cancelEdit = () => {
@@ -447,12 +329,6 @@ export default function Processes() {
       court: "",
       inspection_date: "",
       status: "pending",
-      determined_value: 0,
-      payment_status: "pending",
-      payment_amount: 0,
-      payment_date: "",
-      payment_notes: "",
-      payment_due_date: "",
     });
   };
 
@@ -488,12 +364,6 @@ export default function Processes() {
       court: editDraft.court || null,
       status: editDraft.status,
       inspection_date: editDraft.inspection_date ? new Date(editDraft.inspection_date).toISOString() : null,
-      determined_value: editDraft.determined_value,
-      payment_status: editDraft.payment_status,
-      payment_amount: editDraft.payment_amount,
-      payment_date: editDraft.payment_date ? new Date(editDraft.payment_date).toISOString() : null,
-      payment_notes: editDraft.payment_notes,
-      payment_due_date: editDraft.payment_due_date || null,
     };
 
     const { error } = await supabase
@@ -534,29 +404,9 @@ export default function Processes() {
     return <Badge variant={config.variant}>{config.label}</Badge>;
   };
 
-  const getPaymentStatusBadge = (status: string) => {
-    const statusConfig = {
-      pending: { label: "Pendente", variant: "secondary" as const },
-      partial: { label: "Parcial", variant: "default" as const },
-      paid: { label: "Pago", variant: "default" as const },
-      overdue: { label: "Vencido", variant: "destructive" as const },
-    };
-
-    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
-    return <Badge variant={config.variant}>{config.label}</Badge>;
-  };
-
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "Não agendada";
     return new Date(dateString).toLocaleDateString("pt-BR");
-  };
-
-  const formatCurrency = (value: number | undefined) => {
-    if (!value) return "R$ 0,00";
-    return new Intl.NumberFormat("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    }).format(value);
   };
 
   if (loading) {
@@ -704,26 +554,6 @@ export default function Processes() {
                           />
                         </div>
 
-                        {anyPaymentVisible && (
-                          <div>
-                            <Label htmlFor="payment-status-filter">Status do Pagamento</Label>
-                            <Select
-                              value={advancedFilters.payment_status}
-                              onValueChange={(value) => setAdvancedFilters({...advancedFilters, payment_status: value})}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Todos" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="">Todos</SelectItem>
-                                <SelectItem value="pending">Pendente</SelectItem>
-                                <SelectItem value="paid">Pago</SelectItem>
-                                <SelectItem value="overdue">Atrasado</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-
                         <div>
                           <Label htmlFor="date-from">Data Inicial</Label>
                           <Input
@@ -741,28 +571,6 @@ export default function Processes() {
                             type="date"
                             value={advancedFilters.date_to}
                             onChange={(e) => setAdvancedFilters({...advancedFilters, date_to: e.target.value})}
-                          />
-                        </div>
-
-                        <div>
-                          <Label htmlFor="value-min">Valor Mínimo</Label>
-                          <Input
-                            id="value-min"
-                            type="number"
-                            placeholder="0,00"
-                            value={advancedFilters.value_min}
-                            onChange={(e) => setAdvancedFilters({...advancedFilters, value_min: e.target.value})}
-                          />
-                        </div>
-
-                        <div>
-                          <Label htmlFor="value-max">Valor Máximo</Label>
-                          <Input
-                            id="value-max"
-                            type="number"
-                            placeholder="0,00"
-                            value={advancedFilters.value_max}
-                            onChange={(e) => setAdvancedFilters({...advancedFilters, value_max: e.target.value})}
                           />
                         </div>
                       </div>
@@ -846,129 +654,105 @@ export default function Processes() {
                       <div className="flex items-start justify-between gap-4">
                         {editingId === process.id ? (
                           <div className="flex-1 space-y-3">
-                            <Input
-                              value={editDraft.process_number}
-                              onChange={(e) => setEditDraft({ ...editDraft, process_number: e.target.value })}
-                              placeholder="Número do processo"
-                            />
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label htmlFor="edit_process_number">Número do processo</Label>
                               <Input
-                                value={editDraft.claimant_name}
-                                onChange={(e) => setEditDraft({ ...editDraft, claimant_name: e.target.value })}
-                                placeholder="Reclamante"
+                                id="edit_process_number"
+                                value={editDraft.process_number}
+                                onChange={(e) => setEditDraft({ ...editDraft, process_number: e.target.value })}
+                                placeholder="0000000-00.0000.0.00.0000"
                               />
-                              <Input
-                                value={editDraft.defendant_name}
-                                onChange={(e) => setEditDraft({ ...editDraft, defendant_name: e.target.value })}
-                                placeholder="Reclamada"
-                              />
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              {(() => {
-                                const raw = (process as { report_config?: unknown }).report_config;
-                                let rc: Record<string, unknown> = {};
-                                try {
-                                  rc = typeof raw === "object" && raw ? raw : JSON.parse(String(raw || "{}"));
-                                } catch {
-                                  rc = {};
-                                }
-                                const options: string[] = Array.isArray((rc as { court_options?: unknown }).court_options)
-                                  ? (((rc as { court_options?: unknown }).court_options as string[]) || [])
-                                  : [];
-                                return options.length > 0 ? (
-                                  <Select
-                                    value={editDraft.court || undefined}
-                                    onValueChange={(v) => setEditDraft({ ...editDraft, court: v })}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Vara / Tribunal" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {options.map((opt) => (
-                                        <SelectItem key={opt} value={opt}>
-                                          {opt}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                ) : (
-                                  <Input
-                                    value={editDraft.court}
-                                    onChange={(e) => setEditDraft({ ...editDraft, court: e.target.value })}
-                                    placeholder="Vara"
-                                  />
-                                );
-                              })()}
-                              <Input
-                                type="date"
-                                value={editDraft.inspection_date}
-                                onChange={(e) => setEditDraft({ ...editDraft, inspection_date: e.target.value })}
-                              />
-                              <Select value={editDraft.status} onValueChange={(v) => setEditDraft({ ...editDraft, status: v })}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="pending">Pendente</SelectItem>
-                                  <SelectItem value="in_progress">Em Andamento</SelectItem>
-                                  <SelectItem value="completed">Concluído</SelectItem>
-                                  <SelectItem value="cancelled">Cancelado</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={editDraft.determined_value}
-                                onChange={(e) => setEditDraft({ ...editDraft, determined_value: parseFloat(e.target.value) || 0 })}
-                                placeholder="Valor Determinado (R$)"
-                              />
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={editDraft.payment_amount}
-                                onChange={(e) => setEditDraft({ ...editDraft, payment_amount: parseFloat(e.target.value) || 0 })}
-                                placeholder="Valor Pago (R$)"
-                              />
-                              <Select value={editDraft.payment_status} onValueChange={(v) => setEditDraft({ ...editDraft, payment_status: v })}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Status Pagamento" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="pending">Pendente</SelectItem>
-                                  <SelectItem value="partial">Parcial</SelectItem>
-                                  <SelectItem value="paid">Pago</SelectItem>
-                                  <SelectItem value="overdue">Vencido</SelectItem>
-                                </SelectContent>
-                              </Select>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <Input
-                                type="date"
-                                value={editDraft.payment_date}
-                                onChange={(e) => setEditDraft({ ...editDraft, payment_date: e.target.value })}
-                                placeholder="Data do Pagamento"
-                              />
-                              <Input
-                                type="text"
-                                value={editDraft.payment_due_date}
-                                onChange={(e) => setEditDraft({ ...editDraft, payment_due_date: e.target.value })}
-                                placeholder="Número do documento de pagamento"
-                              />
+                              <div className="space-y-1">
+                                <Label htmlFor="edit_claimant_name">Reclamante</Label>
+                                <Input
+                                  id="edit_claimant_name"
+                                  value={editDraft.claimant_name}
+                                  onChange={(e) => setEditDraft({ ...editDraft, claimant_name: e.target.value })}
+                                  placeholder="Nome do(a) reclamante"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="edit_defendant_name">Reclamado(a)</Label>
+                                <Input
+                                  id="edit_defendant_name"
+                                  value={editDraft.defendant_name}
+                                  onChange={(e) => setEditDraft({ ...editDraft, defendant_name: e.target.value })}
+                                  placeholder="Nome do(a) reclamado(a)"
+                                />
+                              </div>
                             </div>
-                            <Input
-                              value={editDraft.payment_notes}
-                              onChange={(e) => setEditDraft({ ...editDraft, payment_notes: e.target.value })}
-                              placeholder="Observações sobre o pagamento"
-                            />
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <Label htmlFor="edit_court">Vara / Tribunal</Label>
+                                {(() => {
+                                  const raw = (process as { report_config?: unknown }).report_config;
+                                  let rc: Record<string, unknown> = {};
+                                  try {
+                                    rc = typeof raw === "object" && raw ? raw : JSON.parse(String(raw || "{}"));
+                                  } catch {
+                                    rc = {};
+                                  }
+                                  const options: string[] = Array.isArray((rc as { court_options?: unknown }).court_options)
+                                    ? (((rc as { court_options?: unknown }).court_options as string[]) || [])
+                                    : [];
+                                  return options.length > 0 ? (
+                                    <Select
+                                      value={editDraft.court || undefined}
+                                      onValueChange={(v) => setEditDraft({ ...editDraft, court: v })}
+                                    >
+                                      <SelectTrigger id="edit_court">
+                                        <SelectValue placeholder="Selecione" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {options.map((opt) => (
+                                          <SelectItem key={opt} value={opt}>
+                                            {opt}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  ) : (
+                                    <Input
+                                      id="edit_court"
+                                      value={editDraft.court}
+                                      onChange={(e) => setEditDraft({ ...editDraft, court: e.target.value })}
+                                      placeholder="Ex.: 3ª Vara do Trabalho"
+                                    />
+                                  );
+                                })()}
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="edit_inspection_date">Data da perícia</Label>
+                                <Input
+                                  id="edit_inspection_date"
+                                  type="date"
+                                  value={editDraft.inspection_date}
+                                  onChange={(e) => setEditDraft({ ...editDraft, inspection_date: e.target.value })}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="edit_status">Status do processo</Label>
+                                <Select value={editDraft.status} onValueChange={(v) => setEditDraft({ ...editDraft, status: v })}>
+                                  <SelectTrigger id="edit_status">
+                                    <SelectValue placeholder="Selecione" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="pending">Pendente</SelectItem>
+                                    <SelectItem value="in_progress">Em Andamento</SelectItem>
+                                    <SelectItem value="completed">Concluído</SelectItem>
+                                    <SelectItem value="cancelled">Cancelado</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
                           </div>
                         ) : (
                           <div className="space-y-2 flex-1">
                             <div className="flex items-center space-x-3">
                               <h3 className="text-lg font-semibold">{process.process_number}</h3>
                               {getStatusBadge(process.status)}
-                              {canViewPaymentForProcess(process) && process.payment_status && getPaymentStatusBadge(process.payment_status)}
                               {process._is_linked && (
                                 <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
                                   Acesso Vinculado
@@ -991,35 +775,6 @@ export default function Processes() {
                                 <span className="font-medium">Data da Perícia:</span>{" "}
                                 {formatDate(process.inspection_date)}
                               </p>
-                              {process.determined_value && (
-                                <p>
-                                  <span className="font-medium">Valor Determinado:</span>{" "}
-                                  {formatCurrency(process.determined_value)}
-                                </p>
-                              )}
-                              {canViewPaymentForProcess(process) && process.payment_amount && (
-                                <p>
-                                  <span className="font-medium">Valor Pago:</span>{" "}
-                                  {formatCurrency(process.payment_amount)}
-                                </p>
-                              )}
-                              {canViewPaymentForProcess(process) && process.payment_date && (
-                                <p>
-                                  <span className="font-medium">Data do Pagamento:</span>{" "}
-                                  {formatDate(process.payment_date)}
-                                </p>
-                              )}
-                              {canViewPaymentForProcess(process) && process.payment_due_date && (
-                                <p>
-                                  <span className="font-medium">Documento de Pagamento:</span>{" "}
-                                  {process.payment_due_date}
-                                </p>
-                              )}
-                              {canViewPaymentForProcess(process) && process.payment_notes && (
-                                <p>
-                                  <span className="font-medium">Obs. Pagamento:</span> {process.payment_notes}
-                                </p>
-                              )}
                             </div>
                           </div>
                         )}
@@ -1076,12 +831,6 @@ export default function Processes() {
                                   Editar
                                 </Button>
                               )}
-                              {canEditPaymentForProcess(process) && (
-                                <Button onClick={() => openPayment(process)}>
-                                  <Wallet className="w-4 h-4 mr-2" />
-                                  Pagamento
-                                </Button>
-                              )}
                             </>
                           )}
                         </div>
@@ -1118,106 +867,6 @@ export default function Processes() {
           })()
         )}
 
-        <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
-          <DialogContent className="max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Pagamento do Processo</DialogTitle>
-              <DialogDescription>
-                Atualize status, valores e detalhes de identificação do pagamento.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="payment_status">Status do Pagamento</Label>
-                  <Select
-                    value={paymentDraft.payment_status}
-                    onValueChange={(v) => setPaymentDraft({ ...paymentDraft, payment_status: v })}
-                  >
-                    <SelectTrigger id="payment_status">
-                      <SelectValue placeholder="Status Pagamento" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pendente</SelectItem>
-                      <SelectItem value="partial">Parcial</SelectItem>
-                      <SelectItem value="paid">Pago</SelectItem>
-                      <SelectItem value="overdue">Vencido</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="payment_amount">Valor</Label>
-                  <div className="relative">
-                    <Wallet className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      id="payment_amount"
-                      type="number"
-                      step="0.01"
-                      value={paymentDraft.payment_amount}
-                      onChange={(e) =>
-                        setPaymentDraft({ ...paymentDraft, payment_amount: parseFloat(e.target.value) || 0 })
-                      }
-                      placeholder="Valor (R$)"
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="payment_date">Data do Pagamento</Label>
-                  <div className="relative">
-                    <CalendarDays className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      id="payment_date"
-                      type="date"
-                      value={paymentDraft.payment_date}
-                      onChange={(e) => setPaymentDraft({ ...paymentDraft, payment_date: e.target.value })}
-                      placeholder="Data do Pagamento"
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="payment_due_date">Número de documento de identificação para pagamento</Label>
-                  <div className="relative">
-                    <FileText className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      id="payment_due_date"
-                      type="text"
-                      value={paymentDraft.payment_due_date}
-                      onChange={(e) => setPaymentDraft({ ...paymentDraft, payment_due_date: e.target.value })}
-                      placeholder="Número do documento"
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="payment_notes">Observações</Label>
-                  <div className="relative">
-                    <StickyNote className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-                    <Textarea
-                      id="payment_notes"
-                      value={paymentDraft.payment_notes}
-                      onChange={(e) => setPaymentDraft({ ...paymentDraft, payment_notes: e.target.value })}
-                      placeholder="Observações"
-                      className="pl-9 min-h-[110px]"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="sticky bottom-0 bg-background border-t pt-3 z-10">
-              <Button onClick={savePayment}>
-                <Save className="w-4 h-4 mr-2" />
-                Salvar Pagamento
-              </Button>
-              <Button variant="ghost" onClick={() => setPaymentDialogOpen(false)}>
-                Cancelar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   );
