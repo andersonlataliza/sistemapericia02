@@ -89,38 +89,93 @@ export default function PhotoRegisterSection({ processId, value, onChange }: Pho
 
   const sanitizeName = (s: string) => s.replace(/[^a-zA-Z0-9.-]/g, "_");
 
-  const compressImage = async (file: File, quality = 0.9): Promise<File> => {
+  const compressImage = async (file: File): Promise<File> => {
     if (!file.type.startsWith("image/")) return file;
-    if (file.size < 700 * 1024) return file;
 
-    const outputType = file.type.includes("png") ? "image/png" : "image/jpeg";
+    const createBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => {
+            if (!b) {
+              reject(new Error("Falha ao compactar imagem"));
+              return;
+            }
+            resolve(b);
+          },
+          type,
+          quality,
+        );
+      });
+
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" } as any);
+    const maxDim0 = 2048;
+    const maxBytes = 900 * 1024;
+    const maxDim = Math.max(bmp.width || 1, bmp.height || 1);
+    const shouldProcess = file.size > 500 * 1024 || maxDim > maxDim0 || file.type.includes("png");
+    if (!shouldProcess) return file;
+
+    const hasAlpha = await (async () => {
+      if (!file.type.includes("png")) return false;
+      try {
+        const sampleW = 64;
+        const sampleH = 64;
+        const c = document.createElement("canvas");
+        c.width = sampleW;
+        c.height = sampleH;
+        const cx = c.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+        if (!cx) return false;
+        cx.drawImage(bmp, 0, 0, sampleW, sampleH);
+        const img = cx.getImageData(0, 0, sampleW, sampleH);
+        const d = img.data;
+        for (let i = 3; i < d.length; i += 4) {
+          if (d[i] !== 255) return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    })();
+
+    const outputType = file.type.includes("png") && hasAlpha ? "image/png" : "image/jpeg";
     const baseName = file.name.replace(/\.[^/.]+$/, "");
     const outputName = outputType === "image/png" ? `${baseName}.png` : `${baseName}.jpg`;
 
-    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" } as any);
-    const canvas = document.createElement("canvas");
-    canvas.width = bmp.width;
-    canvas.height = bmp.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas não suportado");
-    ctx.drawImage(bmp, 0, 0);
+    let maxSide = maxDim0;
+    for (let attempt = 0; attempt < 7; attempt++) {
+      const scale = Math.min(1, maxSide / Math.max(bmp.width || 1, bmp.height || 1));
+      const w = Math.max(1, Math.round((bmp.width || 1) * scale));
+      const h = Math.max(1, Math.round((bmp.height || 1) * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas não suportado");
+      ctx.imageSmoothingEnabled = true;
+      (ctx as any).imageSmoothingQuality = "high";
+      ctx.drawImage(bmp, 0, 0, w, h);
 
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => {
-          if (!b) {
-            reject(new Error("Falha ao compactar imagem"));
-            return;
-          }
-          resolve(b);
-        },
-        outputType,
-        outputType === "image/jpeg" ? quality : undefined,
-      );
-    });
+      if (outputType === "image/png") {
+        const blob = await createBlob(canvas, outputType);
+        const out = new File([blob], outputName, { type: outputType });
+        if (out.size <= maxBytes || maxSide <= 1400) return out.size < file.size ? out : file;
+        maxSide = Math.max(1400, Math.round(maxSide * 0.85));
+        continue;
+      }
 
-    const out = new File([blob], outputName, { type: outputType });
-    return out.size < file.size ? out : file;
+      let quality = 0.92;
+      for (let qTry = 0; qTry < 6; qTry++) {
+        const blob = await createBlob(canvas, outputType, quality);
+        const out = new File([blob], outputName, { type: outputType });
+        if (out.size <= maxBytes || quality <= 0.80) {
+          return out.size < file.size ? out : file;
+        }
+        quality = Math.max(0.80, quality - 0.05);
+      }
+
+      maxSide = Math.max(1400, Math.round(maxSide * 0.85));
+    }
+
+    return file;
   };
 
   const handleFiles = async (filesList: FileList | null) => {

@@ -40,6 +40,7 @@ import AttendeesSection from "@/components/laudo/AttendeesSection";
 import QuestionnairesSection from "@/components/laudo/QuestionnairesSection";
 import CoverSection from "@/components/laudo/CoverSection";
 import PhotoRegisterSection from "@/components/laudo/PhotoRegisterSection";
+import AnnexSection from "@/components/laudo/AnnexSection";
 import { evaluateInsalubrityByLLM, EPIInput } from "@/lib/llm";
 import FileUpload from "@/components/storage/FileUpload";
 import DocumentViewer from "@/components/storage/DocumentViewer";
@@ -2937,6 +2938,8 @@ export default function ProcessDetail() {
                 const item16Images = (rcImgs.length
                   ? rcImgs
                   : (legacyUrl ? [{ dataUrl: legacyUrl, caption: legacyCaption }] : [])) as any[];
+                const item16Evaluations = (Array.isArray(rc?.item16_insalubrity_evaluations) ? rc.item16_insalubrity_evaluations : []) as any[];
+                const canEditItem16 = !(process as any)?._is_linked;
                 const processTemplates = ((rc.templates || []) as any[]) || [];
                 const combinedMap: Record<string, any> = {};
                 [...globalTemplates, ...processTemplates].forEach((t: any) => {
@@ -2951,6 +2954,16 @@ export default function ProcessDetail() {
                     onGenerateLLM={generateInsalubrityLLM}
                     rowsInAnalysis={annexesForInsalubrityLLM}
                     templates={combinedTemplates as any}
+                    evaluations={item16Evaluations as any}
+                    onEvaluationsChange={
+                      canEditItem16
+                        ? (nextEvaluations) => {
+                            const curr = safeParseJson(process.report_config, {}) as any;
+                            const nextRc = { ...curr, item16_insalubrity_evaluations: nextEvaluations } as any;
+                            updateProcess("report_config" as any, nextRc);
+                          }
+                        : undefined
+                    }
                     images={item16Images as any}
                     onImagesChange={(nextImages) => {
                       const curr = safeParseJson(process.report_config, {}) as any;
@@ -3163,6 +3176,25 @@ export default function ProcessDetail() {
                 value={process.conclusion || ""}
                 onChange={(v) => updateProcess("conclusion", v)}
               />
+
+              {(() => {
+                const rc = safeParseJson(process.report_config, {}) as any;
+                const list = Array.isArray(rc?.item22_annexes) ? rc.item22_annexes : [];
+                const canEdit = !isReadOnly && !(process as any)?._is_linked;
+                return (
+                  <AnnexSection
+                    processId={process.id}
+                    targetUserId={process.user_id}
+                    value={list as any}
+                    readOnly={!canEdit}
+                    onChange={(next) => {
+                      const curr = safeParseJson(process.report_config, {}) as any;
+                      const nextRc = { ...curr, item22_annexes: next } as any;
+                      updateProcess("report_config" as any, nextRc);
+                    }}
+                  />
+                );
+              })()}
 
               <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t py-2">
                 <div className="flex justify-end gap-2">

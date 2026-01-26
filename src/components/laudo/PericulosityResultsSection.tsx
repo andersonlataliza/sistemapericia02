@@ -82,38 +82,102 @@ export default function PericulosityResultsSection({ value, onChange, rowsInAnal
   }, [combined]);
 
   const buildImageDataUrl = async (file: File): Promise<string> => {
+    const toDataUrl = (blob: Blob) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+    const createBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => {
+            if (!b) {
+              reject(new Error("Falha ao processar imagem"));
+              return;
+            }
+            resolve(b);
+          },
+          type,
+          quality,
+        );
+      });
+
     const bmp = await createImageBitmap(file, { imageOrientation: "from-image" } as any);
-    const maxSide = 900;
-    const scale = Math.min(1, maxSide / Math.max(bmp.width || 1, bmp.height || 1));
-    const w = Math.max(1, Math.round((bmp.width || 1) * scale));
-    const h = Math.max(1, Math.round((bmp.height || 1) * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas não suportado");
-    ctx.drawImage(bmp, 0, 0, w, h);
-    const outputType = file.type.includes("png") ? "image/png" : "image/jpeg";
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => {
-          if (!b) {
-            reject(new Error("Falha ao processar imagem"));
-            return;
-          }
-          resolve(b);
-        },
-        outputType,
-        outputType === "image/jpeg" ? 0.85 : undefined,
-      );
-    });
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    return dataUrl;
+    const hasAlpha = await (async () => {
+      if (!file.type.includes("png")) return false;
+      try {
+        const sampleW = 64;
+        const sampleH = 64;
+        const c = document.createElement("canvas");
+        c.width = sampleW;
+        c.height = sampleH;
+        const cx = c.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+        if (!cx) return false;
+        cx.drawImage(bmp, 0, 0, sampleW, sampleH);
+        const img = cx.getImageData(0, 0, sampleW, sampleH);
+        const d = img.data;
+        for (let i = 3; i < d.length; i += 4) {
+          if (d[i] !== 255) return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    })();
+
+    const maxSide0 = 1400;
+    const maxBytes = 650 * 1024;
+    let maxSide = maxSide0;
+    let w0 = bmp.width || 1;
+    let h0 = bmp.height || 1;
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const scale = Math.min(1, maxSide / Math.max(w0, h0));
+      const w = Math.max(1, Math.round(w0 * scale));
+      const h = Math.max(1, Math.round(h0 * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas não suportado");
+      ctx.imageSmoothingEnabled = true;
+      (ctx as any).imageSmoothingQuality = "high";
+      ctx.drawImage(bmp, 0, 0, w, h);
+
+      const outputType = file.type.includes("png") && hasAlpha ? "image/png" : "image/jpeg";
+
+      if (outputType === "image/png") {
+        const blob = await createBlob(canvas, outputType);
+        if (blob.size <= maxBytes || maxSide <= 900) {
+          return await toDataUrl(blob);
+        }
+        maxSide = Math.max(900, Math.round(maxSide * 0.85));
+        continue;
+      }
+
+      let quality = 0.92;
+      for (let qTry = 0; qTry < 5; qTry++) {
+        const blob = await createBlob(canvas, outputType, quality);
+        if (blob.size <= maxBytes || quality <= 0.78) {
+          return await toDataUrl(blob);
+        }
+        quality = Math.max(0.78, quality - 0.06);
+      }
+
+      maxSide = Math.max(900, Math.round(maxSide * 0.85));
+    }
+
+    const fallbackCanvas = document.createElement("canvas");
+    fallbackCanvas.width = Math.max(1, Math.round((bmp.width || 1) * 0.6));
+    fallbackCanvas.height = Math.max(1, Math.round((bmp.height || 1) * 0.6));
+    const fallbackCtx = fallbackCanvas.getContext("2d");
+    if (!fallbackCtx) throw new Error("Canvas não suportado");
+    fallbackCtx.drawImage(bmp, 0, 0, fallbackCanvas.width, fallbackCanvas.height);
+    const fallbackBlob = await createBlob(fallbackCanvas, "image/jpeg", 0.82);
+    return await toDataUrl(fallbackBlob);
   };
 
   const handlePickedImages = async (files: File[]) => {

@@ -1,6 +1,7 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, Header, Footer, PageNumber, ImageRun, TableOfContents, PageBreak, HorizontalPositionAlign, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, VerticalPositionAlign, TextWrappingType, TabStopType, UnderlineType, SectionType } from "docx";
 import jsPDF from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 
 interface ProcessData {
   process_number?: string;
@@ -171,6 +172,145 @@ function getSupportedImageType(dataUrl: string): 'png' | 'jpg' | 'gif' | 'bmp' |
   if (lower.startsWith('data:image/gif')) return 'gif';
   if (lower.startsWith('data:image/bmp')) return 'bmp';
   return null;
+}
+
+async function optimizeImageDataUrlForEmbed(
+  inputDataUrl: string,
+  options?: { maxSide?: number; maxBytes?: number; formatHint?: 'PNG' | 'JPEG' }
+): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG'; naturalWidth: number; naturalHeight: number }> {
+  const maxSide0 = Math.max(200, Number(options?.maxSide ?? 1600));
+  const maxBytes = Math.max(80 * 1024, Number(options?.maxBytes ?? 850 * 1024));
+
+  const toDataUrl = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+  const createBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
+    new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => {
+          if (!b) {
+            reject(new Error('Falha ao processar imagem'));
+            return;
+          }
+          resolve(b);
+        },
+        type,
+        quality,
+      );
+    });
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Falha ao carregar imagem'));
+    el.src = inputDataUrl;
+  });
+
+  const naturalWidth = img.naturalWidth || img.width || 0;
+  const naturalHeight = img.naturalHeight || img.height || 0;
+  const w0 = Math.max(1, naturalWidth);
+  const h0 = Math.max(1, naturalHeight);
+
+  const hint = options?.formatHint;
+  const isPngInput = hint ? hint === 'PNG' : String(inputDataUrl || '').toLowerCase().startsWith('data:image/png');
+
+  const hasAlpha = await (async () => {
+    if (!isPngInput) return false;
+    try {
+      const sampleW = 64;
+      const sampleH = 64;
+      const c = document.createElement('canvas');
+      c.width = sampleW;
+      c.height = sampleH;
+      const ctx = c.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+      if (!ctx) return false;
+      ctx.drawImage(img, 0, 0, sampleW, sampleH);
+      const data = ctx.getImageData(0, 0, sampleW, sampleH).data;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] !== 255) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  })();
+
+  const format: 'PNG' | 'JPEG' = isPngInput && hasAlpha ? 'PNG' : 'JPEG';
+  const mime = format === 'PNG' ? 'image/png' : 'image/jpeg';
+
+  let maxSide = maxSide0;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const scale = Math.min(1, maxSide / Math.max(w0, h0));
+    const w = Math.max(1, Math.round(w0 * scale));
+    const h = Math.max(1, Math.round(h0 * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) break;
+    ctx.imageSmoothingEnabled = true;
+    (ctx as any).imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, w, h);
+
+    if (mime === 'image/png') {
+      const blob = await createBlob(canvas, mime);
+      if (blob.size <= maxBytes || maxSide <= 900) {
+        return { dataUrl: await toDataUrl(blob), format, naturalWidth: w, naturalHeight: h };
+      }
+      maxSide = Math.max(900, Math.round(maxSide * 0.85));
+      continue;
+    }
+
+    let quality = 0.92;
+    for (let qTry = 0; qTry < 5; qTry++) {
+      const blob = await createBlob(canvas, mime, quality);
+      if (blob.size <= maxBytes || quality <= 0.80) {
+        return { dataUrl: await toDataUrl(blob), format, naturalWidth: w, naturalHeight: h };
+      }
+      quality = Math.max(0.80, quality - 0.06);
+    }
+
+    maxSide = Math.max(900, Math.round(maxSide * 0.85));
+  }
+
+  return { dataUrl: inputDataUrl, format: isPngInput ? 'PNG' : 'JPEG', naturalWidth: w0, naturalHeight: h0 };
+}
+
+async function renderPdfToOptimizedImages(
+  pdfBytes: ArrayBuffer,
+  options?: { scale?: number; maxPages?: number; maxSide?: number; maxBytes?: number }
+): Promise<Array<{ dataUrl: string; naturalWidth: number; naturalHeight: number }>> {
+  const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
+  (pdfjs as any).GlobalWorkerOptions.workerSrc = pdfWorkerUrl as any;
+  const task = (pdfjs as any).getDocument({ data: pdfBytes });
+  const pdf = await task.promise;
+  const maxPages = Math.max(1, Number(options?.maxPages ?? pdf.numPages));
+  const pagesToRender = Math.min(pdf.numPages, maxPages);
+  const scale = Math.max(0.5, Number(options?.scale ?? 1.5));
+  const maxSide = Math.max(600, Number(options?.maxSide ?? 1800));
+  const maxBytes = Math.max(120 * 1024, Number(options?.maxBytes ?? 650 * 1024));
+
+  const out: Array<{ dataUrl: string; naturalWidth: number; naturalHeight: number }> = [];
+  for (let i = 1; i <= pagesToRender; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(viewport.width));
+    canvas.height = Math.max(1, Math.round(viewport.height));
+    const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+    if (!ctx) continue;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+    const optimized = await optimizeImageDataUrlForEmbed(dataUrl, { maxSide, maxBytes, formatHint: "PNG" });
+    out.push({ dataUrl: optimized.dataUrl, naturalWidth: optimized.naturalWidth, naturalHeight: optimized.naturalHeight });
+  }
+  return out;
 }
 
 function cmToPx(cm: number): number {
@@ -630,13 +770,14 @@ async function createPhotoRegisterDocxSection(process: ProcessData): Promise<(Pa
       if (!flags.safeMode && src) {
         try {
           const loaded = await loadUrlToDataUrl(src);
-          const mediaType = getSupportedImageType(loaded.dataUrl);
+          const optimized = await optimizeImageDataUrlForEmbed(loaded.dataUrl, { maxSide: 1600, maxBytes: 650 * 1024, formatHint: loaded.format });
+          const mediaType = getSupportedImageType(optimized.dataUrl);
           if (mediaType) {
             const targetPxW = 280;
-            const targetPxH = loaded.naturalWidth && loaded.naturalHeight
-              ? Math.round(targetPxW * (loaded.naturalHeight / loaded.naturalWidth))
+            const targetPxH = optimized.naturalWidth && optimized.naturalHeight
+              ? Math.round(targetPxW * (optimized.naturalHeight / optimized.naturalWidth))
               : 160;
-            const bytes = dataUrlToUint8Array(loaded.dataUrl);
+            const bytes = dataUrlToUint8Array(optimized.dataUrl);
             const imgRun = new ImageRun({ data: bytes, transformation: { width: targetPxW, height: targetPxH }, type: mediaType });
             children.push(new Paragraph({ children: [imgRun], alignment: AlignmentType.CENTER }));
           }
@@ -872,6 +1013,16 @@ async function createInsalubrityResultsSection(process: ProcessData, sectionNumb
       return (process as any).report_config || {};
     }
   })();
+  const evaluationsRaw = Array.isArray(rcAny?.item16_insalubrity_evaluations) ? rcAny.item16_insalubrity_evaluations : [];
+  const evaluations = evaluationsRaw
+    .map((e: any) => ({
+      annex: typeof e?.annex === 'number' ? e.annex : undefined,
+      agent: String(e?.agent || '').trim(),
+      evaluation_type: String(e?.evaluation_type || '').trim(),
+      intensity: String(e?.intensity || '').trim(),
+      tolerance_limit: String(e?.tolerance_limit || '').trim(),
+    }))
+    .filter((e: any) => e.annex || e.agent || e.evaluation_type || e.intensity || e.tolerance_limit);
   const item16Images = !flags.safeMode
     ? (Array.isArray(rcAny?.item16_images) ? rcAny.item16_images : [])
     : [];
@@ -897,6 +1048,43 @@ async function createInsalubrityResultsSection(process: ProcessData, sectionNumb
       heading: HeadingLevel.HEADING_1,
       spacing: { before: 400, after: 200 },
     }),
+
+    ...(evaluations.length
+      ? (() => {
+          const headerRow = new TableRow({
+            children: [
+              docxCell([docxCellText("Anexo (NR-15)", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 13, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("Agente", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 27, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("Avaliação", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 15, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("Intensidade", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 20, type: WidthType.PERCENTAGE } }),
+              docxCell([docxCellText("Limite de tolerância", { bold: true, alignment: AlignmentType.CENTER })], { header: true, width: { size: 25, type: WidthType.PERCENTAGE } }),
+            ],
+          });
+
+          const rows: TableRow[] = evaluations.map((e: any) => {
+            const annex = e.annex ? `Anexo ${e.annex}` : "----------";
+            const agent = e.agent || "----------";
+            const evType = e.evaluation_type || "----------";
+            const intensity = e.intensity || "----------";
+            const tol = e.tolerance_limit || "----------";
+            return new TableRow({
+              children: [
+                docxCell([docxCellText(annex, { alignment: AlignmentType.CENTER })]),
+                docxCell([docxCellText(agent, { alignment: AlignmentType.LEFT })]),
+                docxCell([docxCellText(evType, { alignment: AlignmentType.CENTER })]),
+                docxCell([docxCellText(intensity, { alignment: AlignmentType.CENTER })]),
+                docxCell([docxCellText(tol, { alignment: AlignmentType.CENTER })]),
+              ],
+            });
+          });
+
+          return [
+            new Paragraph({ children: [new TextRun({ text: "Tabela de avaliações (NR-15)", bold: true, size: 24 })], spacing: { after: 120 } }),
+            new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...rows], alignment: AlignmentType.CENTER, borders: DOCX_TABLE_BORDERS }),
+            new Paragraph({ spacing: { after: 200 } }),
+          ];
+        })()
+      : []),
 
     ...resultParagraphs,
 
@@ -2731,6 +2919,79 @@ async function createConclusionSection(process: ProcessData, sectionNumber: numb
   return blocks;
 }
 
+async function createAnnexesDocxSection(process: ProcessData, sectionNumber: number): Promise<(Paragraph | Table)[]> {
+  const parseRc = (rc: any) => { try { return typeof rc === 'string' ? JSON.parse(rc || '{}') : (rc || {}); } catch { return {}; } };
+  const rc = parseRc((process as any).report_config);
+  const raw = Array.isArray(rc?.item22_annexes) ? rc.item22_annexes : [];
+  const selected = raw
+    .filter((a: any) => a && (a.includeInPrint === true || a.include_in_print === true))
+    .map((a: any) => ({
+      filePath: String(a.filePath || a.file_path || '').trim(),
+      fileName: String(a.fileName || a.file_name || '').trim(),
+      displayName: String(a.displayName || a.display_name || '').trim(),
+    }))
+    .filter((a: any) => !!a.filePath);
+
+  if (!selected.length) return [];
+
+  const blocks: (Paragraph | Table)[] = [];
+  blocks.push(
+    new Paragraph({
+      children: [new TextRun({ text: `${sectionNumber}. ANEXO`, bold: true, size: 28 })],
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: 400, after: 200 },
+    }),
+  );
+
+  const flags = getDocxFlags(process);
+  if (flags.safeMode) {
+    selected.forEach((a: any) => {
+      const name = a.displayName || a.fileName || a.filePath;
+      blocks.push(new Paragraph({ children: [new TextRun({ text: `• ${String(name)}`, size: 24 })], spacing: { after: 120, line: 360 }, alignment: AlignmentType.JUSTIFIED }));
+    });
+    return blocks;
+  }
+
+  let firstImage = true;
+  for (const a of selected) {
+    const name = a.displayName || a.fileName || a.filePath;
+    blocks.push(
+      new Paragraph({
+        children: [new TextRun({ text: String(name), bold: true, size: 28 })],
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 200, after: 200 },
+      }),
+    );
+
+    try {
+      const { data, error } = await supabase.storage.from('process-documents').download(a.filePath);
+      if (error) throw error;
+      const bytes = await data.arrayBuffer();
+      const images = await renderPdfToOptimizedImages(bytes, { scale: 1.5, maxSide: 1800, maxBytes: 650 * 1024 });
+
+      for (const img of images) {
+        if (!firstImage) blocks.push(new Paragraph({ children: [new PageBreak()] }));
+        firstImage = false;
+
+        const mediaType = getSupportedImageType(img.dataUrl);
+        if (!mediaType) continue;
+        const targetPxW = cmToPx(16.5);
+        const targetPxH = img.naturalWidth && img.naturalHeight ? Math.round(targetPxW * (img.naturalHeight / img.naturalWidth)) : Math.round(targetPxW * 1.294);
+        const imgRun = new ImageRun({
+          data: dataUrlToUint8Array(img.dataUrl),
+          transformation: { width: targetPxW, height: targetPxH },
+          type: mediaType,
+        });
+        blocks.push(new Paragraph({ children: [imgRun], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0 } }));
+      }
+    } catch {
+      blocks.push(new Paragraph({ children: [new TextRun({ text: 'Falha ao carregar o anexo.', size: 24 })], spacing: { after: 200 } }));
+    }
+  }
+
+  return blocks;
+}
+
 export async function exportReportAsDocx(
   content: string,
   process: ProcessData,
@@ -2790,6 +3051,9 @@ export async function exportReportAsDocx(
       includeInsalubridade = hasNr15Rows || hasInsalubridadeText;
     }
 
+    const rawAnnexes22 = Array.isArray((rc as any)?.item22_annexes) ? (rc as any).item22_annexes : [];
+    const hasAnnexes22 = rawAnnexes22.some((a: any) => a && (a.includeInPrint === true || a.include_in_print === true) && String(a.filePath || a.file_path || '').trim());
+
     let nextNumber = 16;
     const insalubrityResultsNumber = includeInsalubridade ? nextNumber++ : undefined;
     const periculosityConceptNumber = includePericulosidade ? nextNumber++ : undefined;
@@ -2797,6 +3061,7 @@ export async function exportReportAsDocx(
     const periculosityResultsNumber = includePericulosidade ? nextNumber++ : undefined;
     const quesitosNumber = nextNumber++;
     const conclusaoNumber = nextNumber++;
+    const anexosNumber = hasAnnexes22 ? nextNumber++ : undefined;
 
     const page = {
       margin: {
@@ -2930,6 +3195,7 @@ export async function exportReportAsDocx(
             ...(includePericulosidade && periculosityResultsNumber != null ? await createPericulosityResultsSection(process, periculosityResultsNumber) : []),
             ...createQuestionnairesSection(process, quesitosNumber),
             ...(await createConclusionSection(process, conclusaoNumber)),
+            ...(anexosNumber != null ? await createAnnexesDocxSection(process, anexosNumber) : []),
           ],
         },
       ],
@@ -3057,6 +3323,17 @@ export async function exportReportAsPdf(
       includeInsalubridade = hasNr15Rows || hasInsalubridadeText;
     }
 
+    const rawAnnexes22 = Array.isArray((rcType as any)?.item22_annexes) ? (rcType as any).item22_annexes : [];
+    const selectedAnnexes22 = rawAnnexes22
+      .filter((a: any) => a && (a.includeInPrint === true || a.include_in_print === true))
+      .map((a: any) => ({
+        filePath: String(a.filePath || a.file_path || '').trim(),
+        fileName: String(a.fileName || a.file_name || '').trim(),
+        displayName: String(a.displayName || a.display_name || '').trim(),
+      }))
+      .filter((a: any) => !!a.filePath);
+    const hasAnnexes22 = selectedAnnexes22.length > 0;
+
     let nextNumber = 16;
     const insalubrityResultsNumber = includeInsalubridade ? nextNumber++ : undefined;
     const periculosityConceptNumber = includePericulosidade ? nextNumber++ : undefined;
@@ -3064,6 +3341,7 @@ export async function exportReportAsPdf(
     const periculosityResultsNumber = includePericulosidade ? nextNumber++ : undefined;
     const quesitosNumber = nextNumber++;
     const conclusaoNumber = nextNumber++;
+    const anexosNumber = hasAnnexes22 ? nextNumber++ : undefined;
 
     const parseRcQ = (rc: any) => {
       try {
@@ -3126,6 +3404,9 @@ export async function exportReportAsPdf(
       if (hasJudge) tocTitleBySectionKey[`${quesitosNumber}.3`] = `${quesitosNumber}.3 - Quesitos do Juíz(a)`;
     }
     tocTitleBySectionKey[String(conclusaoNumber)] = `${conclusaoNumber} - Conclusão`;
+    if (anexosNumber != null) {
+      tocTitleBySectionKey[String(anexosNumber)] = `${anexosNumber} - Anexo`;
+    }
 
     // Utilitário para carregar imagem como DataURL e detectar formato
     const loadImageAsDataUrl = async (url: string): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG'; naturalWidth: number; naturalHeight: number }> => {
@@ -3174,15 +3455,15 @@ export async function exportReportAsPdf(
     const headerAlign: 'left' | 'center' | 'right' = headerCfg.imageAlign || 'left';
     if (headerCfg.imageDataUrl && String(headerCfg.imageDataUrl).trim().length > 10) {
       try {
-        const normalized = await normalizeDataUrlToPng(headerCfg.imageDataUrl);
-        headerImageData = normalized.dataUrl;
-        headerImageFormat = 'PNG';
+        const optimized = await optimizeImageDataUrlForEmbed(headerCfg.imageDataUrl, { maxSide: 2000, maxBytes: 550 * 1024 });
+        headerImageData = optimized.dataUrl;
+        headerImageFormat = optimized.format;
         if (!headerW) {
           headerW = headerFill ? pageWidth : contentWidth;
         }
         if (!headerH && headerW) {
-          if (normalized.naturalWidth && normalized.naturalHeight) {
-            headerH = Math.round(headerW * (normalized.naturalHeight / normalized.naturalWidth));
+          if (optimized.naturalWidth && optimized.naturalHeight) {
+            headerH = Math.round(headerW * (optimized.naturalHeight / optimized.naturalWidth));
           } else {
             headerH = 40;
           }
@@ -3197,14 +3478,15 @@ export async function exportReportAsPdf(
     } else if (headerCfg.imageUrl && String(headerCfg.imageUrl).trim().length > 0) {
       try {
         const loaded = await loadUrlToDataUrl(headerCfg.imageUrl);
-        headerImageData = loaded.dataUrl;
-        headerImageFormat = loaded.format;
+        const optimized = await optimizeImageDataUrlForEmbed(loaded.dataUrl, { maxSide: 2000, maxBytes: 550 * 1024, formatHint: loaded.format });
+        headerImageData = optimized.dataUrl;
+        headerImageFormat = optimized.format;
         if (!headerW) {
           headerW = headerFill ? pageWidth : contentWidth;
         }
         if (!headerH && headerW) {
-          if (loaded.naturalWidth && loaded.naturalHeight) {
-            headerH = Math.round(headerW * (loaded.naturalHeight / loaded.naturalWidth));
+          if (optimized.naturalWidth && optimized.naturalHeight) {
+            headerH = Math.round(headerW * (optimized.naturalHeight / optimized.naturalWidth));
           } else {
             headerH = 40;
           }
@@ -3245,13 +3527,13 @@ export async function exportReportAsPdf(
 
     if (signatureCfg.imageDataUrl && String(signatureCfg.imageDataUrl).trim().length > 10) {
       try {
-        const normalized = await normalizeDataUrlToPng(signatureCfg.imageDataUrl);
-        signatureImageData = normalized.dataUrl;
-        signatureImageFormat = 'PNG';
+        const optimized = await optimizeImageDataUrlForEmbed(signatureCfg.imageDataUrl, { maxSide: 1600, maxBytes: 450 * 1024 });
+        signatureImageData = optimized.dataUrl;
+        signatureImageFormat = optimized.format;
         if (!signatureW) signatureW = Math.min(300, contentWidth);
         if (!signatureH && signatureW) {
-          if (normalized.naturalWidth && normalized.naturalHeight) {
-            signatureH = Math.round(signatureW * (normalized.naturalHeight / normalized.naturalWidth));
+          if (optimized.naturalWidth && optimized.naturalHeight) {
+            signatureH = Math.round(signatureW * (optimized.naturalHeight / optimized.naturalWidth));
           } else {
             signatureH = 60;
           }
@@ -3265,12 +3547,13 @@ export async function exportReportAsPdf(
     } else if (signatureCfg.imageUrl && String(signatureCfg.imageUrl).trim().length > 0) {
       try {
         const loaded = await loadUrlToDataUrl(signatureCfg.imageUrl);
-        signatureImageData = loaded.dataUrl;
-        signatureImageFormat = loaded.format;
+        const optimized = await optimizeImageDataUrlForEmbed(loaded.dataUrl, { maxSide: 1600, maxBytes: 450 * 1024, formatHint: loaded.format });
+        signatureImageData = optimized.dataUrl;
+        signatureImageFormat = optimized.format;
         if (!signatureW) signatureW = Math.min(300, contentWidth);
         if (!signatureH && signatureW) {
-          if (loaded.naturalWidth && loaded.naturalHeight) {
-            signatureH = Math.round(signatureW * (loaded.naturalHeight / loaded.naturalWidth));
+          if (optimized.naturalWidth && optimized.naturalHeight) {
+            signatureH = Math.round(signatureW * (optimized.naturalHeight / optimized.naturalWidth));
           } else {
             signatureH = 60;
           }
@@ -3289,15 +3572,15 @@ export async function exportReportAsPdf(
 
     if (footerCfg.imageDataUrl && String(footerCfg.imageDataUrl).trim().length > 10) {
       try {
-        const normalized = await normalizeDataUrlToPng(footerCfg.imageDataUrl);
-        footerImageData = normalized.dataUrl;
-        footerImageFormat = 'PNG';
+        const optimized = await optimizeImageDataUrlForEmbed(footerCfg.imageDataUrl, { maxSide: 2000, maxBytes: 550 * 1024 });
+        footerImageData = optimized.dataUrl;
+        footerImageFormat = optimized.format;
         if (!footerW) {
           footerW = footerFill ? pageWidth : contentWidth;
         }
         if (!footerH && footerW) {
-          if (normalized.naturalWidth && normalized.naturalHeight) {
-            footerH = Math.round(footerW * (normalized.naturalHeight / normalized.naturalWidth));
+          if (optimized.naturalWidth && optimized.naturalHeight) {
+            footerH = Math.round(footerW * (optimized.naturalHeight / optimized.naturalWidth));
           } else {
             footerH = 40;
           }
@@ -3311,14 +3594,15 @@ export async function exportReportAsPdf(
     } else if (footerCfg.imageUrl && String(footerCfg.imageUrl).trim().length > 0) {
       try {
         const loaded = await loadUrlToDataUrl(footerCfg.imageUrl);
-        footerImageData = loaded.dataUrl;
-        footerImageFormat = loaded.format;
+        const optimized = await optimizeImageDataUrlForEmbed(loaded.dataUrl, { maxSide: 2000, maxBytes: 550 * 1024, formatHint: loaded.format });
+        footerImageData = optimized.dataUrl;
+        footerImageFormat = optimized.format;
         if (!footerW) {
           footerW = footerFill ? pageWidth : contentWidth;
         }
         if (!footerH && footerW) {
-          if (loaded.naturalWidth && loaded.naturalHeight) {
-            footerH = Math.round(footerW * (loaded.naturalHeight / loaded.naturalWidth));
+          if (optimized.naturalWidth && optimized.naturalHeight) {
+            footerH = Math.round(footerW * (optimized.naturalHeight / optimized.naturalWidth));
           } else {
             footerH = 40;
           }
@@ -4007,6 +4291,7 @@ export async function exportReportAsPdf(
           ]
         : []),
       { title: `${conclusaoNumber} - Conclusão` },
+      ...(anexosNumber != null ? [{ title: `${anexosNumber} - Anexo` }] : []),
     ];
     
     summaryItemsModern.forEach(({ title }) => addTocItem(title));
@@ -4312,15 +4597,15 @@ export async function exportReportAsPdf(
           if (src) {
             try {
               const loaded = await loadUrlToDataUrl(src);
-              const normalized = await normalizeDataUrlToPng(loaded.dataUrl);
+              const optimized = await optimizeImageDataUrlForEmbed(loaded.dataUrl, { maxSide: 1600, maxBytes: 650 * 1024, formatHint: loaded.format });
               const w = maxW;
-              const h = normalized.naturalWidth && normalized.naturalHeight ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth)) : Math.round(w * 0.6);
+              const h = optimized.naturalWidth && optimized.naturalHeight ? Math.round(w * (optimized.naturalHeight / optimized.naturalWidth)) : Math.round(w * 0.6);
               const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
               if (rowStartY + h + 40 > pageHeight - reservedBottom) {
                 addPage();
                 rowStartY = cursorY;
               }
-              doc.addImage(normalized.dataUrl, 'PNG', x, rowStartY, w, h);
+              doc.addImage(optimized.dataUrl, optimized.format, x, rowStartY, w, h);
               cellH += h;
               const caption = String(p?.caption || '').trim();
               if (caption) {
@@ -4989,6 +5274,35 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
     if (includeInsalubridade && insalubrityResultsNumber != null) {
       addText(`${insalubrityResultsNumber}. RESULTADOS DAS AVALIAÇÕES REFERENTES À INSALUBRIDADE`, 14, true);
       cursorY += 10;
+
+      try {
+        const evalsRaw = Array.isArray((rcQ as any)?.item16_insalubrity_evaluations) ? (rcQ as any).item16_insalubrity_evaluations : [];
+        const evals = evalsRaw
+          .map((e: any) => ({
+            annex: typeof e?.annex === 'number' ? e.annex : undefined,
+            agent: String(e?.agent || '').trim(),
+            evaluation_type: String(e?.evaluation_type || '').trim(),
+            intensity: String(e?.intensity || '').trim(),
+            tolerance_limit: String(e?.tolerance_limit || '').trim(),
+          }))
+          .filter((e: any) => e.annex || e.agent || e.evaluation_type || e.intensity || e.tolerance_limit);
+
+        if (evals.length > 0) {
+          addText("Tabela de avaliações (NR-15)", 13, true);
+          cursorY += 10;
+          const headers = ["Anexo (NR-15)", "Agente", "Avaliação", "Intensidade", "Limite de tolerância"];
+          const rows = evals.map((e: any) => ({
+            "Anexo (NR-15)": e.annex ? `Anexo ${e.annex}` : "----------",
+            Agente: e.agent || "----------",
+            Avaliação: e.evaluation_type || "----------",
+            Intensidade: e.intensity || "----------",
+            "Limite de tolerância": e.tolerance_limit || "----------",
+          }));
+          drawCenteredTable(headers, rows, [0.15, 0.28, 0.14, 0.18, 0.25]);
+          cursorY += 20;
+        }
+      } catch {}
+
       const insalubrityResults =
         (process as any).insalubrity_results || (process as any).insalubridade_resultados || "Não informado";
       addAnnexResultsWithThemeBox(String(insalubrityResults), 12);
@@ -5013,17 +5327,17 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
           const renderCell = async (p: any, x: number) => {
             let cellH = 0;
             try {
-              const normalized = await normalizeDataUrlToPng(p.dataUrl);
+              const optimized = await optimizeImageDataUrlForEmbed(p.dataUrl, { maxSide: 1600, maxBytes: 650 * 1024 });
               const w = maxW;
-              const h = normalized.naturalWidth && normalized.naturalHeight
-                ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth))
+              const h = optimized.naturalWidth && optimized.naturalHeight
+                ? Math.round(w * (optimized.naturalHeight / optimized.naturalWidth))
                 : Math.round(w * 0.6);
               const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
               if (rowStartY + h + 40 > pageHeight - reservedBottom) {
                 addPage();
                 rowStartY = cursorY;
               }
-              doc.addImage(normalized.dataUrl, 'PNG', x, rowStartY, w, h);
+              doc.addImage(optimized.dataUrl, optimized.format, x, rowStartY, w, h);
               cellH += h;
               const caption = String(p.caption || '').trim();
               if (caption) {
@@ -5113,17 +5427,17 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
           const renderCell = async (p: any, x: number) => {
             let cellH = 0;
             try {
-              const normalized = await normalizeDataUrlToPng(p.dataUrl);
+              const optimized = await optimizeImageDataUrlForEmbed(p.dataUrl, { maxSide: 1600, maxBytes: 650 * 1024 });
               const w = maxW;
-              const h = normalized.naturalWidth && normalized.naturalHeight
-                ? Math.round(w * (normalized.naturalHeight / normalized.naturalWidth))
+              const h = optimized.naturalWidth && optimized.naturalHeight
+                ? Math.round(w * (optimized.naturalHeight / optimized.naturalWidth))
                 : Math.round(w * 0.6);
               const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
               if (rowStartY + h + 40 > pageHeight - reservedBottom) {
                 addPage();
                 rowStartY = cursorY;
               }
-              doc.addImage(normalized.dataUrl, 'PNG', x, rowStartY, w, h);
+              doc.addImage(optimized.dataUrl, optimized.format, x, rowStartY, w, h);
               cellH += h;
               const caption = String(p.caption || '').trim();
               if (caption) {
@@ -5218,6 +5532,49 @@ const introText = String((process as any).epi_intro || (process as any).epi_intr
     cursorY += 10;
     const conclusion = String((process as any).conclusion || (process as any).conclusao || "Considerando a visita pericial realizada, as informações obtidas, os fatos observados e as análises efetuadas, conclui-se, que as atividades desempenhadas pelo(a) reclamante, foram:");
     addParagraphSmartJustified(conclusion, 12);
+
+    if (anexosNumber != null && selectedAnnexes22.length > 0) {
+      cursorY += 20;
+      addText(`${anexosNumber}. ANEXO`, 14, true);
+      cursorY += 10;
+
+      const guessFormat = (dataUrl: string): 'PNG' | 'JPEG' => {
+        const lower = String(dataUrl || '').toLowerCase();
+        if (lower.startsWith('data:image/png')) return 'PNG';
+        if (lower.startsWith('data:image/jpeg') || lower.startsWith('data:image/jpg')) return 'JPEG';
+        return 'JPEG';
+      };
+
+      for (const a of selectedAnnexes22) {
+        const name = a.displayName || a.fileName || a.filePath;
+        addText(String(name), 13, true);
+        cursorY += 6;
+
+        try {
+          const { data, error } = await supabase.storage.from('process-documents').download(a.filePath);
+          if (error) throw error;
+          const bytes = await data.arrayBuffer();
+          const images = await renderPdfToOptimizedImages(bytes, { scale: 1.5, maxSide: 1800, maxBytes: 650 * 1024 });
+
+          for (const img of images) {
+            const fmt = guessFormat(img.dataUrl);
+            const w = contentWidth;
+            const h = img.naturalWidth && img.naturalHeight ? Math.round(w * (img.naturalHeight / img.naturalWidth)) : Math.round(w * 1.294);
+            const reservedBottom = footerImageData ? ((footerH || 40) + footerGap) : 100;
+            if (cursorY + h > pageHeight - reservedBottom) {
+              addPage();
+            }
+            doc.addImage(img.dataUrl, fmt, marginLeft, cursorY, w, h);
+            cursorY += h + 12;
+          }
+        } catch {
+          addText('Falha ao carregar o anexo.', 12, false);
+          cursorY += 10;
+        }
+
+        cursorY += 10;
+      }
+    }
     
     
 

@@ -821,6 +821,132 @@ export type Database = {
         }
         Relationships: []
       }
+      calibration_certificates: {
+        Row: {
+          id: string
+          user_id: string
+          equipment_name: string
+          model: string
+          manufacturer: string
+          attachment_path: string
+          attachment_name: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          equipment_name: string
+          model: string
+          manufacturer: string
+          attachment_path: string
+          attachment_name: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          equipment_name?: string
+          model?: string
+          manufacturer?: string
+          attachment_path?: string
+          attachment_name?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      irr_records: {
+        Row: {
+          id: string
+          user_id: string
+          representative_controversy: string
+          theme_type: string
+          legal_thesis: string
+          attachment_path: string
+          attachment_name: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          representative_controversy: string
+          theme_type: string
+          legal_thesis: string
+          attachment_path: string
+          attachment_name: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          representative_controversy?: string
+          theme_type?: string
+          legal_thesis?: string
+          attachment_path?: string
+          attachment_name?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      technical_notes: {
+        Row: {
+          id: string
+          user_id: string
+          subject: string
+          technical_note: string
+          attachment_path: string
+          attachment_name: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          subject: string
+          technical_note: string
+          attachment_path: string
+          attachment_name: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          subject?: string
+          technical_note?: string
+          attachment_path?: string
+          attachment_name?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      sumula_records: {
+        Row: {
+          id: string
+          user_id: string
+          sumula_number: string
+          legal_issue: string
+          attachment_path: string
+          attachment_name: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          sumula_number: string
+          legal_issue: string
+          attachment_path: string
+          attachment_name: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          sumula_number?: string
+          legal_issue?: string
+          attachment_path?: string
+          attachment_name?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

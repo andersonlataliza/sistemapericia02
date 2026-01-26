@@ -63,6 +63,48 @@ type FispqRecord = {
   __local?: boolean;
 };
 
+type CalibrationCertificate = {
+  id: string;
+  equipment_name: string;
+  model: string;
+  manufacturer: string;
+  attachment_path: string;
+  attachment_name: string;
+  created_at: string;
+  __local?: boolean;
+};
+
+type IrrRecord = {
+  id: string;
+  representative_controversy: string;
+  theme_type: "insalubridade" | "periculosidade";
+  legal_thesis: string;
+  attachment_path: string;
+  attachment_name: string;
+  created_at: string;
+  __local?: boolean;
+};
+
+type TechnicalNoteRecord = {
+  id: string;
+  subject: string;
+  technical_note: string;
+  attachment_path: string;
+  attachment_name: string;
+  created_at: string;
+  __local?: boolean;
+};
+
+type SumulaRecord = {
+  id: string;
+  sumula_number: string;
+  legal_issue: string;
+  attachment_path: string;
+  attachment_name: string;
+  created_at: string;
+  __local?: boolean;
+};
+
 type FispqEditDraft = {
   product_identification: string;
   hazard_identification: string;
@@ -201,9 +243,315 @@ const parseFispqFromText = (text: string) => {
   };
 };
 
+const getLocalFispqStorageKey = (userId: string) => `local_fispq_records_${userId}`;
+
+const readLocalFispqs = (userId: string): FispqRecord[] => {
+  try {
+    const raw = localStorage.getItem(getLocalFispqStorageKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const items = parsed
+      .map((r: any) => {
+        const id = typeof r?.id === "string" ? r.id : "";
+        const created_at = typeof r?.created_at === "string" ? r.created_at : "";
+        const attachment_path = typeof r?.attachment_path === "string" ? r.attachment_path : "";
+        const attachment_name = typeof r?.attachment_name === "string" ? r.attachment_name : "";
+        if (!id || !created_at || !attachment_path || !attachment_name) return null;
+        return {
+          id,
+          product_identification: typeof r?.product_identification === "string" ? r.product_identification : null,
+          hazard_identification: typeof r?.hazard_identification === "string" ? r.hazard_identification : null,
+          composition: typeof r?.composition === "string" ? r.composition : null,
+          nr15_annex: typeof r?.nr15_annex === "string" ? r.nr15_annex : null,
+          tolerance_limit: typeof r?.tolerance_limit === "string" ? r.tolerance_limit : null,
+          skin_absorption_risk: typeof r?.skin_absorption_risk === "string" ? r.skin_absorption_risk : null,
+          flash_point: typeof r?.flash_point === "string" ? r.flash_point : null,
+          protection_measures_required: typeof r?.protection_measures_required === "string" ? r.protection_measures_required : null,
+          attachment_path,
+          attachment_name,
+          extracted_text: typeof r?.extracted_text === "string" ? r.extracted_text : null,
+          created_at,
+          __local: true,
+        } as FispqRecord;
+      })
+      .filter(Boolean) as FispqRecord[];
+
+    items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalFispqs = (userId: string, items: FispqRecord[]) => {
+  try {
+    const serialized = items.map(({ __local, ...rest }) => rest);
+    localStorage.setItem(getLocalFispqStorageKey(userId), JSON.stringify(serialized));
+  } catch {
+  }
+};
+
+const addLocalFispq = (userId: string, record: FispqRecord) => {
+  const existing = readLocalFispqs(userId);
+  const next = [{ ...record, __local: true }, ...existing];
+  writeLocalFispqs(userId, next);
+  return next;
+};
+
+const removeLocalFispq = (userId: string, id: string) => {
+  const existing = readLocalFispqs(userId);
+  const next = existing.filter((x) => x.id !== id);
+  writeLocalFispqs(userId, next);
+  return next;
+};
+
+const updateLocalFispq = (userId: string, record: FispqRecord) => {
+  const existing = readLocalFispqs(userId);
+  const next = existing.map((x) => (x.id === record.id ? { ...record, __local: true } : x));
+  writeLocalFispqs(userId, next);
+  return next;
+};
+
+const getLocalCalibrationStorageKey = (userId: string) => `local_calibration_certificates_${userId}`;
+
+const readLocalCalibrations = (userId: string): CalibrationCertificate[] => {
+  try {
+    const raw = localStorage.getItem(getLocalCalibrationStorageKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const items = parsed
+      .map((r: any) => {
+        const id = typeof r?.id === "string" ? r.id : "";
+        const created_at = typeof r?.created_at === "string" ? r.created_at : "";
+        const attachment_path = typeof r?.attachment_path === "string" ? r.attachment_path : "";
+        const attachment_name = typeof r?.attachment_name === "string" ? r.attachment_name : "";
+        const equipment_name = typeof r?.equipment_name === "string" ? r.equipment_name : "";
+        const model = typeof r?.model === "string" ? r.model : "";
+        const manufacturer = typeof r?.manufacturer === "string" ? r.manufacturer : "";
+        if (!id || !created_at || !attachment_path || !attachment_name || !equipment_name || !model || !manufacturer) return null;
+        return {
+          id,
+          equipment_name,
+          model,
+          manufacturer,
+          attachment_path,
+          attachment_name,
+          created_at,
+          __local: true,
+        } as CalibrationCertificate;
+      })
+      .filter(Boolean) as CalibrationCertificate[];
+
+    items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalCalibrations = (userId: string, items: CalibrationCertificate[]) => {
+  try {
+    const serialized = items.map(({ __local, ...rest }) => rest);
+    localStorage.setItem(getLocalCalibrationStorageKey(userId), JSON.stringify(serialized));
+  } catch {
+  }
+};
+
+const addLocalCalibration = (userId: string, record: CalibrationCertificate) => {
+  const existing = readLocalCalibrations(userId);
+  const next = [{ ...record, __local: true }, ...existing];
+  writeLocalCalibrations(userId, next);
+  return next;
+};
+
+const removeLocalCalibration = (userId: string, id: string) => {
+  const existing = readLocalCalibrations(userId);
+  const next = existing.filter((x) => x.id !== id);
+  writeLocalCalibrations(userId, next);
+  return next;
+};
+
+const getLocalIrrStorageKey = (userId: string) => `local_irr_records_${userId}`;
+
+const readLocalIrrs = (userId: string): IrrRecord[] => {
+  try {
+    const raw = localStorage.getItem(getLocalIrrStorageKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const items = parsed
+      .map((r: any) => {
+        const id = typeof r?.id === "string" ? r.id : "";
+        const created_at = typeof r?.created_at === "string" ? r.created_at : "";
+        const attachment_path = typeof r?.attachment_path === "string" ? r.attachment_path : "";
+        const attachment_name = typeof r?.attachment_name === "string" ? r.attachment_name : "";
+        const representative_controversy = typeof r?.representative_controversy === "string" ? r.representative_controversy : "";
+        const theme_type = r?.theme_type === "insalubridade" || r?.theme_type === "periculosidade" ? r.theme_type : "";
+        const legal_thesis = typeof r?.legal_thesis === "string" ? r.legal_thesis : "";
+        if (!id || !created_at || !attachment_path || !attachment_name || !representative_controversy || !theme_type || !legal_thesis) return null;
+        return {
+          id,
+          representative_controversy,
+          theme_type,
+          legal_thesis,
+          attachment_path,
+          attachment_name,
+          created_at,
+          __local: true,
+        } as IrrRecord;
+      })
+      .filter(Boolean) as IrrRecord[];
+
+    items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalIrrs = (userId: string, items: IrrRecord[]) => {
+  try {
+    const serialized = items.map(({ __local, ...rest }) => rest);
+    localStorage.setItem(getLocalIrrStorageKey(userId), JSON.stringify(serialized));
+  } catch {
+  }
+};
+
+const addLocalIrr = (userId: string, record: IrrRecord) => {
+  const existing = readLocalIrrs(userId);
+  const next = [{ ...record, __local: true }, ...existing];
+  writeLocalIrrs(userId, next);
+  return next;
+};
+
+const removeLocalIrr = (userId: string, id: string) => {
+  const existing = readLocalIrrs(userId);
+  const next = existing.filter((x) => x.id !== id);
+  writeLocalIrrs(userId, next);
+  return next;
+};
+
+const getLocalTechnicalNotesStorageKey = (userId: string) => `local_technical_notes_${userId}`;
+
+const readLocalTechnicalNotes = (userId: string): TechnicalNoteRecord[] => {
+  try {
+    const raw = localStorage.getItem(getLocalTechnicalNotesStorageKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const items = parsed
+      .map((r: any) => {
+        const id = typeof r?.id === "string" ? r.id : "";
+        const created_at = typeof r?.created_at === "string" ? r.created_at : "";
+        const attachment_path = typeof r?.attachment_path === "string" ? r.attachment_path : "";
+        const attachment_name = typeof r?.attachment_name === "string" ? r.attachment_name : "";
+        const subject = typeof r?.subject === "string" ? r.subject : "";
+        const technical_note = typeof r?.technical_note === "string" ? r.technical_note : "";
+        if (!id || !created_at || !attachment_path || !attachment_name || !subject || !technical_note) return null;
+        return {
+          id,
+          subject,
+          technical_note,
+          attachment_path,
+          attachment_name,
+          created_at,
+          __local: true,
+        } as TechnicalNoteRecord;
+      })
+      .filter(Boolean) as TechnicalNoteRecord[];
+
+    items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalTechnicalNotes = (userId: string, items: TechnicalNoteRecord[]) => {
+  try {
+    const serialized = items.map(({ __local, ...rest }) => rest);
+    localStorage.setItem(getLocalTechnicalNotesStorageKey(userId), JSON.stringify(serialized));
+  } catch {
+  }
+};
+
+const addLocalTechnicalNote = (userId: string, record: TechnicalNoteRecord) => {
+  const existing = readLocalTechnicalNotes(userId);
+  const next = [{ ...record, __local: true }, ...existing];
+  writeLocalTechnicalNotes(userId, next);
+  return next;
+};
+
+const removeLocalTechnicalNote = (userId: string, id: string) => {
+  const existing = readLocalTechnicalNotes(userId);
+  const next = existing.filter((x) => x.id !== id);
+  writeLocalTechnicalNotes(userId, next);
+  return next;
+};
+
+const getLocalSumulaStorageKey = (userId: string) => `local_sumula_records_${userId}`;
+
+const readLocalSumulas = (userId: string): SumulaRecord[] => {
+  try {
+    const raw = localStorage.getItem(getLocalSumulaStorageKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const items = parsed
+      .map((r: any) => {
+        const id = typeof r?.id === "string" ? r.id : "";
+        const created_at = typeof r?.created_at === "string" ? r.created_at : "";
+        const attachment_path = typeof r?.attachment_path === "string" ? r.attachment_path : "";
+        const attachment_name = typeof r?.attachment_name === "string" ? r.attachment_name : "";
+        const sumula_number = typeof r?.sumula_number === "string" ? r.sumula_number : "";
+        const legal_issue = typeof r?.legal_issue === "string" ? r.legal_issue : "";
+        if (!id || !created_at || !attachment_path || !attachment_name || !sumula_number || !legal_issue) return null;
+        return {
+          id,
+          sumula_number,
+          legal_issue,
+          attachment_path,
+          attachment_name,
+          created_at,
+          __local: true,
+        } as SumulaRecord;
+      })
+      .filter(Boolean) as SumulaRecord[];
+
+    items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalSumulas = (userId: string, items: SumulaRecord[]) => {
+  try {
+    const serialized = items.map(({ __local, ...rest }) => rest);
+    localStorage.setItem(getLocalSumulaStorageKey(userId), JSON.stringify(serialized));
+  } catch {
+  }
+};
+
+const addLocalSumula = (userId: string, record: SumulaRecord) => {
+  const existing = readLocalSumulas(userId);
+  const next = [{ ...record, __local: true }, ...existing];
+  writeLocalSumulas(userId, next);
+  return next;
+};
+
+const removeLocalSumula = (userId: string, id: string) => {
+  const existing = readLocalSumulas(userId);
+  const next = existing.filter((x) => x.id !== id);
+  writeLocalSumulas(userId, next);
+  return next;
+};
+
 export default function MaterialConsulta() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"arquivos" | "boletins" | "fispq">("arquivos");
+  const [activeTab, setActiveTab] = useState<"arquivos" | "boletins" | "fispq" | "calibracao" | "irr" | "nota-tecnica" | "sumula">("arquivos");
 
   const [materialOwnerId, setMaterialOwnerId] = useState<string | null>(null);
 
@@ -275,76 +623,71 @@ export default function MaterialConsulta() {
   });
   const [updatingFispqId, setUpdatingFispqId] = useState<string | null>(null);
 
-  const getLocalFispqStorageKey = (userId: string) => `local_fispq_records_${userId}`;
-
-  const readLocalFispqs = (userId: string): FispqRecord[] => {
+  const [calibrationLoading, setCalibrationLoading] = useState(true);
+  const [calibrations, setCalibrations] = useState<CalibrationCertificate[]>([]);
+  const [calibrationQuery, setCalibrationQuery] = useState("");
+  const [missingCalibrationTableWarned, setMissingCalibrationTableWarned] = useState(() => {
     try {
-      const raw = localStorage.getItem(getLocalFispqStorageKey(userId));
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      const items = parsed
-        .map((r: any) => {
-          const id = typeof r?.id === "string" ? r.id : "";
-          const created_at = typeof r?.created_at === "string" ? r.created_at : "";
-          const attachment_path = typeof r?.attachment_path === "string" ? r.attachment_path : "";
-          const attachment_name = typeof r?.attachment_name === "string" ? r.attachment_name : "";
-          if (!id || !created_at || !attachment_path || !attachment_name) return null;
-          return {
-            id,
-            product_identification: typeof r?.product_identification === "string" ? r.product_identification : null,
-            hazard_identification: typeof r?.hazard_identification === "string" ? r.hazard_identification : null,
-            composition: typeof r?.composition === "string" ? r.composition : null,
-            nr15_annex: typeof r?.nr15_annex === "string" ? r.nr15_annex : null,
-            tolerance_limit: typeof r?.tolerance_limit === "string" ? r.tolerance_limit : null,
-            skin_absorption_risk: typeof r?.skin_absorption_risk === "string" ? r.skin_absorption_risk : null,
-            flash_point: typeof r?.flash_point === "string" ? r.flash_point : null,
-            protection_measures_required:
-              typeof r?.protection_measures_required === "string" ? r.protection_measures_required : null,
-            attachment_path,
-            attachment_name,
-            extracted_text: typeof r?.extracted_text === "string" ? r.extracted_text : null,
-            created_at,
-            __local: true,
-          } as FispqRecord;
-        })
-        .filter(Boolean) as FispqRecord[];
-
-      items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return items;
+      return localStorage.getItem("missing_table_calibration_certificates") === "1";
     } catch {
-      return [];
+      return false;
     }
-  };
+  });
+  const [calibrationDraft, setCalibrationDraft] = useState({
+    equipment_name: "",
+    model: "",
+    manufacturer: "",
+  });
+  const [deletingCalibrationId, setDeletingCalibrationId] = useState<string | null>(null);
 
-  const writeLocalFispqs = (userId: string, items: FispqRecord[]) => {
+  const [irrLoading, setIrrLoading] = useState(true);
+  const [irrs, setIrrs] = useState<IrrRecord[]>([]);
+  const [irrQuery, setIrrQuery] = useState("");
+  const [missingIrrTableWarned, setMissingIrrTableWarned] = useState(() => {
     try {
-      const serialized = items.map(({ __local, ...rest }) => rest);
-      localStorage.setItem(getLocalFispqStorageKey(userId), JSON.stringify(serialized));
+      return localStorage.getItem("missing_table_irr_records") === "1";
     } catch {
+      return false;
     }
-  };
+  });
+  const [irrDraft, setIrrDraft] = useState({
+    representative_controversy: "",
+    theme_type: "" as "" | "insalubridade" | "periculosidade",
+    legal_thesis: "",
+  });
+  const [deletingIrrId, setDeletingIrrId] = useState<string | null>(null);
 
-  const addLocalFispq = (userId: string, record: FispqRecord) => {
-    const existing = readLocalFispqs(userId);
-    const next = [{ ...record, __local: true }, ...existing];
-    writeLocalFispqs(userId, next);
-    return next;
-  };
+  const [technicalNotesLoading, setTechnicalNotesLoading] = useState(true);
+  const [technicalNotes, setTechnicalNotes] = useState<TechnicalNoteRecord[]>([]);
+  const [technicalNoteQuery, setTechnicalNoteQuery] = useState("");
+  const [missingTechnicalNotesTableWarned, setMissingTechnicalNotesTableWarned] = useState(() => {
+    try {
+      return localStorage.getItem("missing_table_technical_notes") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [technicalNoteDraft, setTechnicalNoteDraft] = useState({
+    subject: "",
+    technical_note: "",
+  });
+  const [deletingTechnicalNoteId, setDeletingTechnicalNoteId] = useState<string | null>(null);
 
-  const removeLocalFispq = (userId: string, id: string) => {
-    const existing = readLocalFispqs(userId);
-    const next = existing.filter((x) => x.id !== id);
-    writeLocalFispqs(userId, next);
-    return next;
-  };
-
-  const updateLocalFispq = (userId: string, record: FispqRecord) => {
-    const existing = readLocalFispqs(userId);
-    const next = existing.map((x) => (x.id === record.id ? { ...record, __local: true } : x));
-    writeLocalFispqs(userId, next);
-    return next;
-  };
+  const [sumulasLoading, setSumulasLoading] = useState(true);
+  const [sumulas, setSumulas] = useState<SumulaRecord[]>([]);
+  const [sumulaQuery, setSumulaQuery] = useState("");
+  const [missingSumulaTableWarned, setMissingSumulaTableWarned] = useState(() => {
+    try {
+      return localStorage.getItem("missing_table_sumula_records") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [sumulaDraft, setSumulaDraft] = useState({
+    sumula_number: "",
+    legal_issue: "",
+  });
+  const [deletingSumulaId, setDeletingSumulaId] = useState<string | null>(null);
 
   const startEditFispq = (f: FispqRecord) => {
     setExpandedFispqId(f.id);
@@ -674,16 +1017,431 @@ export default function MaterialConsulta() {
     } finally {
       setFispqLoading(false);
     }
-  }, [missingFispqTableWarned, toast]);
+  }, [materialOwnerId, missingFispqTableWarned, toast]);
+
+  const fetchCalibrations = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const force = !!opts?.force;
+      setCalibrationLoading(true);
+      try {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+
+        const userId = userRes.user.id;
+        const ownerId = materialOwnerId || userId;
+
+        if (missingCalibrationTableWarned && !force) {
+          setCalibrations(readLocalCalibrations(userId));
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("calibration_certificates")
+          .select("id, equipment_name, model, manufacturer, attachment_path, attachment_name, created_at")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const localBefore = readLocalCalibrations(userId);
+        if (localBefore.length > 0) {
+          const payload = localBefore.map((r) => ({
+            user_id: ownerId,
+            equipment_name: r.equipment_name,
+            model: r.model,
+            manufacturer: r.manufacturer,
+            attachment_path: r.attachment_path,
+            attachment_name: r.attachment_name,
+          }));
+
+          const { error: syncErr } = await supabase.from("calibration_certificates").insert(payload);
+          if (!syncErr) {
+            writeLocalCalibrations(userId, []);
+          }
+        }
+
+        const localAfter = readLocalCalibrations(userId);
+        const remoteRows = ((data || []) as any[]).map((r) => ({ ...r, __local: false }));
+        const combined = [...localAfter, ...(remoteRows as any)];
+        combined.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setCalibrations(combined as any);
+
+        if (missingCalibrationTableWarned) {
+          setMissingCalibrationTableWarned(false);
+          try {
+            localStorage.removeItem("missing_table_calibration_certificates");
+          } catch {
+          }
+        }
+      } catch (e) {
+        const anyErr = e as any;
+        const status = Number(anyErr?.status || anyErr?.statusCode || anyErr?.cause?.status || 0);
+
+        if (status === 404) {
+          try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const userId = userRes?.user?.id;
+            if (userId) {
+              setCalibrations(readLocalCalibrations(userId));
+            } else {
+              setCalibrations([]);
+            }
+          } catch {
+            setCalibrations([]);
+          }
+          if (!missingCalibrationTableWarned) {
+            setMissingCalibrationTableWarned(true);
+            try {
+              localStorage.setItem("missing_table_calibration_certificates", "1");
+            } catch {
+            }
+            toast({
+              title: "Tabela não encontrada",
+              description: "A tabela calibration_certificates não existe no Supabase. Aplique a migration 20260126000001_calibration_certificates.sql para habilitar a sincronização.",
+              variant: "destructive",
+            });
+          }
+        } else {
+          const message = e instanceof Error ? e.message : "Erro ao carregar certificados";
+          toast({ title: "Erro", description: message, variant: "destructive" });
+          setCalibrations([]);
+        }
+      } finally {
+        setCalibrationLoading(false);
+      }
+    },
+    [materialOwnerId, missingCalibrationTableWarned, toast],
+  );
+
+  const fetchIrrs = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const force = !!opts?.force;
+      setIrrLoading(true);
+      try {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+
+        const userId = userRes.user.id;
+        const ownerId = materialOwnerId || userId;
+
+        if (missingIrrTableWarned && !force) {
+          setIrrs(readLocalIrrs(userId));
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("irr_records")
+          .select("id, representative_controversy, theme_type, legal_thesis, attachment_path, attachment_name, created_at")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const localBefore = readLocalIrrs(userId);
+        if (localBefore.length > 0) {
+          const payload = localBefore.map((r) => ({
+            user_id: ownerId,
+            representative_controversy: r.representative_controversy,
+            theme_type: r.theme_type,
+            legal_thesis: r.legal_thesis,
+            attachment_path: r.attachment_path,
+            attachment_name: r.attachment_name,
+          }));
+
+          const { error: syncErr } = await supabase.from("irr_records").insert(payload);
+          if (!syncErr) {
+            writeLocalIrrs(userId, []);
+          }
+        }
+
+        const localAfter = readLocalIrrs(userId);
+        const remoteRows = ((data || []) as any[]).map((r) => ({ ...r, __local: false }));
+        const combined = [...localAfter, ...(remoteRows as any)];
+        combined.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setIrrs(combined as any);
+
+        if (missingIrrTableWarned) {
+          setMissingIrrTableWarned(false);
+          try {
+            localStorage.removeItem("missing_table_irr_records");
+          } catch {
+          }
+        }
+      } catch (e) {
+        const anyErr = e as any;
+        const status = Number(anyErr?.status || anyErr?.statusCode || anyErr?.cause?.status || 0);
+
+        if (status === 404) {
+          try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const userId = userRes?.user?.id;
+            if (userId) {
+              setIrrs(readLocalIrrs(userId));
+            } else {
+              setIrrs([]);
+            }
+          } catch {
+            setIrrs([]);
+          }
+          if (!missingIrrTableWarned) {
+            setMissingIrrTableWarned(true);
+            try {
+              localStorage.setItem("missing_table_irr_records", "1");
+            } catch {
+            }
+            toast({
+              title: "Tabela não encontrada",
+              description: "A tabela irr_records não existe no Supabase. Aplique a migration 20260126000002_irr_records.sql.",
+              variant: "destructive",
+            });
+          }
+        } else {
+          const message = e instanceof Error ? e.message : "Erro ao carregar IRR";
+          toast({ title: "Erro", description: message, variant: "destructive" });
+          setIrrs([]);
+        }
+      } finally {
+        setIrrLoading(false);
+      }
+    },
+    [materialOwnerId, missingIrrTableWarned, toast],
+  );
+
+  const fetchTechnicalNotes = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const force = !!opts?.force;
+      setTechnicalNotesLoading(true);
+      try {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+
+        const userId = userRes.user.id;
+        const ownerId = materialOwnerId || userId;
+
+        if (missingTechnicalNotesTableWarned && !force) {
+          setTechnicalNotes(readLocalTechnicalNotes(userId));
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("technical_notes")
+          .select("id, subject, technical_note, attachment_path, attachment_name, created_at")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const localBefore = readLocalTechnicalNotes(userId);
+        if (localBefore.length > 0) {
+          const payload = localBefore.map((r) => ({
+            user_id: ownerId,
+            subject: r.subject,
+            technical_note: r.technical_note,
+            attachment_path: r.attachment_path,
+            attachment_name: r.attachment_name,
+          }));
+
+          const { error: syncErr } = await supabase.from("technical_notes").insert(payload);
+          if (!syncErr) {
+            writeLocalTechnicalNotes(userId, []);
+          }
+        }
+
+        const localAfter = readLocalTechnicalNotes(userId);
+        const remoteRows = ((data || []) as any[]).map((r) => ({ ...r, __local: false }));
+        const combined = [...localAfter, ...(remoteRows as any)];
+        combined.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setTechnicalNotes(combined as any);
+
+        if (missingTechnicalNotesTableWarned) {
+          setMissingTechnicalNotesTableWarned(false);
+          try {
+            localStorage.removeItem("missing_table_technical_notes");
+          } catch {
+          }
+        }
+      } catch (e) {
+        const anyErr = e as any;
+        const status = Number(anyErr?.status || anyErr?.statusCode || anyErr?.cause?.status || 0);
+        const rawMessage =
+          typeof anyErr?.message === "string"
+            ? anyErr.message
+            : typeof anyErr?.error === "string"
+              ? anyErr.error
+              : "";
+        const rawDetails = typeof anyErr?.details === "string" ? anyErr.details : "";
+        const lower = `${rawMessage} ${rawDetails}`.toLowerCase();
+        const looksLike404 = status === 404 || (lower.includes("404") && lower.includes("technical_notes"));
+
+        if (looksLike404) {
+          try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const userId = userRes?.user?.id;
+            if (userId) {
+              setTechnicalNotes(readLocalTechnicalNotes(userId));
+            } else {
+              setTechnicalNotes([]);
+            }
+          } catch {
+            setTechnicalNotes([]);
+          }
+          if (!missingTechnicalNotesTableWarned) {
+            setMissingTechnicalNotesTableWarned(true);
+            try {
+              localStorage.setItem("missing_table_technical_notes", "1");
+            } catch {
+            }
+            toast({
+              title: "Tabela não encontrada",
+              description: "A tabela technical_notes não existe no Supabase. Aplique a migration 20260126000003_technical_notes.sql.",
+              variant: "destructive",
+            });
+          }
+        } else {
+          const message = e instanceof Error ? e.message : "Erro ao carregar Nota Técnica";
+          toast({ title: "Erro", description: message, variant: "destructive" });
+          setTechnicalNotes([]);
+        }
+      } finally {
+        setTechnicalNotesLoading(false);
+      }
+    },
+    [materialOwnerId, missingTechnicalNotesTableWarned, toast],
+  );
+
+  const fetchSumulas = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const force = !!opts?.force;
+      setSumulasLoading(true);
+      try {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+
+        const userId = userRes.user.id;
+        const ownerId = materialOwnerId || userId;
+
+        if (missingSumulaTableWarned && !force) {
+          setSumulas(readLocalSumulas(userId));
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("sumula_records")
+          .select("id, sumula_number, legal_issue, attachment_path, attachment_name, created_at")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const localBefore = readLocalSumulas(userId);
+        if (localBefore.length > 0) {
+          const payload = localBefore.map((r) => ({
+            user_id: ownerId,
+            sumula_number: r.sumula_number,
+            legal_issue: r.legal_issue,
+            attachment_path: r.attachment_path,
+            attachment_name: r.attachment_name,
+          }));
+
+          const { error: syncErr } = await supabase.from("sumula_records").insert(payload);
+          if (!syncErr) {
+            writeLocalSumulas(userId, []);
+          }
+        }
+
+        const localAfter = readLocalSumulas(userId);
+        const remoteRows = ((data || []) as any[]).map((r) => ({ ...r, __local: false }));
+        const combined = [...localAfter, ...(remoteRows as any)];
+        combined.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setSumulas(combined as any);
+
+        if (missingSumulaTableWarned) {
+          setMissingSumulaTableWarned(false);
+          try {
+            localStorage.removeItem("missing_table_sumula_records");
+          } catch {
+          }
+        }
+      } catch (e) {
+        const anyErr = e as any;
+        const status = Number(anyErr?.status || anyErr?.statusCode || anyErr?.cause?.status || 0);
+        const rawMessage =
+          typeof anyErr?.message === "string"
+            ? anyErr.message
+            : typeof anyErr?.error === "string"
+              ? anyErr.error
+              : "";
+        const rawDetails = typeof anyErr?.details === "string" ? anyErr.details : "";
+        const lower = `${rawMessage} ${rawDetails}`.toLowerCase();
+        const looksLike404 = status === 404 || (lower.includes("404") && lower.includes("sumula_records"));
+
+        if (looksLike404) {
+          try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const userId = userRes?.user?.id;
+            if (userId) {
+              setSumulas(readLocalSumulas(userId));
+            } else {
+              setSumulas([]);
+            }
+          } catch {
+            setSumulas([]);
+          }
+          if (!missingSumulaTableWarned) {
+            setMissingSumulaTableWarned(true);
+            try {
+              localStorage.setItem("missing_table_sumula_records", "1");
+            } catch {
+            }
+            toast({
+              title: "Tabela não encontrada",
+              description: "A tabela sumula_records não existe no Supabase. Aplique a migration 20260126000004_sumula_records.sql.",
+              variant: "destructive",
+            });
+          }
+        } else {
+          const message = e instanceof Error ? e.message : "Erro ao carregar Súmulas";
+          toast({ title: "Erro", description: message, variant: "destructive" });
+          setSumulas([]);
+        }
+      } finally {
+        setSumulasLoading(false);
+      }
+    },
+    [materialOwnerId, missingSumulaTableWarned, toast],
+  );
 
   useEffect(() => {
     if (activeTab === "boletins") {
       if (!missingBulletinsTableWarned) fetchBulletins();
     }
     if (activeTab === "fispq") {
-      if (!missingFispqTableWarned) fetchFispqs();
+      fetchFispqs();
     }
-  }, [activeTab, fetchBulletins, fetchFispqs, missingBulletinsTableWarned, missingFispqTableWarned]);
+    if (activeTab === "calibracao") {
+      fetchCalibrations();
+    }
+    if (activeTab === "irr") {
+      fetchIrrs();
+    }
+    if (activeTab === "nota-tecnica") {
+      fetchTechnicalNotes();
+    }
+    if (activeTab === "sumula") {
+      fetchSumulas();
+    }
+  }, [
+    activeTab,
+    fetchBulletins,
+    fetchCalibrations,
+    fetchFispqs,
+    fetchIrrs,
+    fetchSumulas,
+    fetchTechnicalNotes,
+    missingBulletinsTableWarned,
+    missingCalibrationTableWarned,
+    missingFispqTableWarned,
+    missingIrrTableWarned,
+    missingSumulaTableWarned,
+    missingTechnicalNotesTableWarned,
+  ]);
+
 
   const filteredDocs = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -739,6 +1497,56 @@ export default function MaterialConsulta() {
       );
     });
   }, [fispqs, fispqQuery]);
+
+  const filteredCalibrations = useMemo(() => {
+    const q = calibrationQuery.trim().toLowerCase();
+    if (!q) return calibrations;
+    return calibrations.filter((c) => {
+      return (
+        String(c.equipment_name || "").toLowerCase().includes(q) ||
+        String(c.model || "").toLowerCase().includes(q) ||
+        String(c.manufacturer || "").toLowerCase().includes(q) ||
+        String(c.attachment_name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [calibrations, calibrationQuery]);
+
+  const filteredIrrs = useMemo(() => {
+    const q = irrQuery.trim().toLowerCase();
+    if (!q) return irrs;
+    return irrs.filter((r) => {
+      return (
+        String(r.representative_controversy || "").toLowerCase().includes(q) ||
+        String(r.theme_type || "").toLowerCase().includes(q) ||
+        String(r.legal_thesis || "").toLowerCase().includes(q) ||
+        String(r.attachment_name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [irrs, irrQuery]);
+
+  const filteredTechnicalNotes = useMemo(() => {
+    const q = technicalNoteQuery.trim().toLowerCase();
+    if (!q) return technicalNotes;
+    return technicalNotes.filter((n) => {
+      return (
+        String(n.subject || "").toLowerCase().includes(q) ||
+        String(n.technical_note || "").toLowerCase().includes(q) ||
+        String(n.attachment_name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [technicalNotes, technicalNoteQuery]);
+
+  const filteredSumulas = useMemo(() => {
+    const q = sumulaQuery.trim().toLowerCase();
+    if (!q) return sumulas;
+    return sumulas.filter((s) => {
+      return (
+        String(s.sumula_number || "").toLowerCase().includes(q) ||
+        String(s.legal_issue || "").toLowerCase().includes(q) ||
+        String(s.attachment_name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [sumulas, sumulaQuery]);
 
   const previewDoc = async (doc: MaterialDoc) => {
     try {
@@ -974,6 +1782,250 @@ export default function MaterialConsulta() {
       toast({ title: "Erro", description: message, variant: "destructive" });
     } finally {
       setDeletingFispqId(null);
+    }
+  };
+
+  const previewCalibrationAttachment = async (c: CalibrationCertificate) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").createSignedUrl(c.attachment_path, 3600);
+      if (error) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao visualizar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const downloadCalibrationAttachment = async (c: CalibrationCertificate) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").download(c.attachment_path);
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = window.document.createElement("a");
+      a.href = url;
+      a.download = c.attachment_name;
+      window.document.body.appendChild(a);
+      a.click();
+      window.document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao baixar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const deleteCalibration = async (c: CalibrationCertificate) => {
+    try {
+      setDeletingCalibrationId(c.id);
+
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+      const userId = userRes.user.id;
+
+      const { error: storageErr } = await supabase.storage.from("process-documents").remove([c.attachment_path]);
+      if (storageErr) throw storageErr;
+
+      if (c.__local) {
+        removeLocalCalibration(userId, c.id);
+        setCalibrations((prev) => prev.filter((x) => x.id !== c.id));
+        toast({ title: "Removido", description: "Certificado excluído." });
+        return;
+      }
+
+      const { error: dbErr } = await supabase.from("calibration_certificates").delete().eq("id", c.id);
+      if (dbErr) throw dbErr;
+
+      setCalibrations((prev) => prev.filter((x) => x.id !== c.id));
+      toast({ title: "Removido", description: "Certificado excluído." });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao excluir";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    } finally {
+      setDeletingCalibrationId(null);
+    }
+  };
+
+  const previewIrrAttachment = async (r: IrrRecord) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").createSignedUrl(r.attachment_path, 3600);
+      if (error) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao visualizar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const downloadIrrAttachment = async (r: IrrRecord) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").download(r.attachment_path);
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = window.document.createElement("a");
+      a.href = url;
+      a.download = r.attachment_name;
+      window.document.body.appendChild(a);
+      a.click();
+      window.document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao baixar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const deleteIrr = async (r: IrrRecord) => {
+    try {
+      setDeletingIrrId(r.id);
+
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+      const userId = userRes.user.id;
+
+      const { error: storageErr } = await supabase.storage.from("process-documents").remove([r.attachment_path]);
+      if (storageErr) throw storageErr;
+
+      if (r.__local) {
+        removeLocalIrr(userId, r.id);
+        setIrrs((prev) => prev.filter((x) => x.id !== r.id));
+        toast({ title: "Removido", description: "IRR excluído." });
+        return;
+      }
+
+      const { error: dbErr } = await supabase.from("irr_records").delete().eq("id", r.id);
+      if (dbErr) throw dbErr;
+
+      setIrrs((prev) => prev.filter((x) => x.id !== r.id));
+      toast({ title: "Removido", description: "IRR excluído." });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao excluir";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    } finally {
+      setDeletingIrrId(null);
+    }
+  };
+
+  const previewTechnicalNoteAttachment = async (n: TechnicalNoteRecord) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").createSignedUrl(n.attachment_path, 3600);
+      if (error) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao visualizar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const downloadTechnicalNoteAttachment = async (n: TechnicalNoteRecord) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").download(n.attachment_path);
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = window.document.createElement("a");
+      a.href = url;
+      a.download = n.attachment_name;
+      window.document.body.appendChild(a);
+      a.click();
+      window.document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao baixar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const deleteTechnicalNote = async (n: TechnicalNoteRecord) => {
+    try {
+      setDeletingTechnicalNoteId(n.id);
+
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+      const userId = userRes.user.id;
+
+      const { error: storageErr } = await supabase.storage.from("process-documents").remove([n.attachment_path]);
+      if (storageErr) throw storageErr;
+
+      if (n.__local) {
+        removeLocalTechnicalNote(userId, n.id);
+        setTechnicalNotes((prev) => prev.filter((x) => x.id !== n.id));
+        toast({ title: "Removido", description: "Nota técnica excluída." });
+        return;
+      }
+
+      const { error: dbErr } = await supabase.from("technical_notes").delete().eq("id", n.id);
+      if (dbErr) throw dbErr;
+
+      setTechnicalNotes((prev) => prev.filter((x) => x.id !== n.id));
+      toast({ title: "Removido", description: "Nota técnica excluída." });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao excluir";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    } finally {
+      setDeletingTechnicalNoteId(null);
+    }
+  };
+
+  const previewSumulaAttachment = async (s: SumulaRecord) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").createSignedUrl(s.attachment_path, 3600);
+      if (error) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao visualizar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const downloadSumulaAttachment = async (s: SumulaRecord) => {
+    try {
+      const { data, error } = await supabase.storage.from("process-documents").download(s.attachment_path);
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = window.document.createElement("a");
+      a.href = url;
+      a.download = s.attachment_name;
+      window.document.body.appendChild(a);
+      a.click();
+      window.document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao baixar";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    }
+  };
+
+  const deleteSumula = async (s: SumulaRecord) => {
+    try {
+      setDeletingSumulaId(s.id);
+
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userRes.user) throw new Error("Usuário não autenticado");
+      const userId = userRes.user.id;
+
+      const { error: storageErr } = await supabase.storage.from("process-documents").remove([s.attachment_path]);
+      if (storageErr) throw storageErr;
+
+      if (s.__local) {
+        removeLocalSumula(userId, s.id);
+        setSumulas((prev) => prev.filter((x) => x.id !== s.id));
+        toast({ title: "Removido", description: "Súmula excluída." });
+        return;
+      }
+
+      const { error: dbErr } = await supabase.from("sumula_records").delete().eq("id", s.id);
+      if (dbErr) throw dbErr;
+
+      setSumulas((prev) => prev.filter((x) => x.id !== s.id));
+      toast({ title: "Removido", description: "Súmula excluída." });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao excluir";
+      toast({ title: "Erro", description: message, variant: "destructive" });
+    } finally {
+      setDeletingSumulaId(null);
     }
   };
 
@@ -1250,6 +2302,10 @@ export default function MaterialConsulta() {
                 <TabsTrigger value="arquivos">Arquivos</TabsTrigger>
                 <TabsTrigger value="boletins">Boletins técnicos</TabsTrigger>
                 <TabsTrigger value="fispq">FISPQ</TabsTrigger>
+                <TabsTrigger value="calibracao">Certificado de calibração</TabsTrigger>
+                <TabsTrigger value="irr">IRR</TabsTrigger>
+                <TabsTrigger value="nota-tecnica">Nota Técnica</TabsTrigger>
+                <TabsTrigger value="sumula">Súmula</TabsTrigger>
               </TabsList>
 
               <TabsContent value="arquivos" className="space-y-4">
@@ -1567,6 +2623,532 @@ export default function MaterialConsulta() {
                   }}
                 />
               </TabsContent>
+
+              <TabsContent value="calibracao" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="calibration-equipment">Nome do equipamento</Label>
+                    <Input
+                      id="calibration-equipment"
+                      value={calibrationDraft.equipment_name}
+                      onChange={(e) => setCalibrationDraft((p) => ({ ...p, equipment_name: e.target.value }))}
+                      placeholder="Ex.: Dosímetro, Decibelímetro"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="calibration-model">Modelo</Label>
+                    <Input
+                      id="calibration-model"
+                      value={calibrationDraft.model}
+                      onChange={(e) => setCalibrationDraft((p) => ({ ...p, model: e.target.value }))}
+                      placeholder="Ex.: 01dB, 824"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="calibration-manufacturer">Fabricante</Label>
+                    <Input
+                      id="calibration-manufacturer"
+                      value={calibrationDraft.manufacturer}
+                      onChange={(e) => setCalibrationDraft((p) => ({ ...p, manufacturer: e.target.value }))}
+                      placeholder="Ex.: 3M, Brüel & Kjær"
+                    />
+                  </div>
+                </div>
+
+                <FileUpload
+                  bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
+                  pathPrefix="calibracao"
+                  acceptedFileTypes={["application/pdf"]}
+                  maxFileSize={50 * 1024 * 1024}
+                  multiple={false}
+                  enableTextExtraction={false}
+                  onUploadComplete={async (attachmentPath, attachmentName) => {
+                    const equipmentName = calibrationDraft.equipment_name.trim();
+                    const model = calibrationDraft.model.trim();
+                    const manufacturer = calibrationDraft.manufacturer.trim();
+
+                    if (!equipmentName || !model || !manufacturer) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({
+                        title: "Campos obrigatórios",
+                        description: "Preencha Nome do equipamento, Modelo e Fabricante antes de anexar.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+
+                    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+                    if (userErr || !userRes.user) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
+                      return;
+                    }
+
+                    const userId = userRes.user.id;
+                    const ownerId = materialOwnerId || userId;
+
+                    const localRecord: CalibrationCertificate = {
+                      id: (globalThis.crypto as any)?.randomUUID ? (globalThis.crypto as any).randomUUID() : `${Date.now()}_${Math.random()}`,
+                      equipment_name: equipmentName,
+                      model,
+                      manufacturer,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                      created_at: new Date().toISOString(),
+                      __local: true,
+                    };
+
+                    if (missingCalibrationTableWarned) {
+                      const nextLocal = addLocalCalibration(userId, localRecord);
+                      setCalibrations(nextLocal);
+                      toast({
+                        title: "Salvo localmente",
+                        description:
+                          "A tabela calibration_certificates ainda não está disponível no Supabase. O certificado foi registrado localmente e será sincronizado quando a tabela existir.",
+                      });
+                      setCalibrationDraft({ equipment_name: "", model: "", manufacturer: "" });
+                      return;
+                    }
+
+                    const { error: preErr } = await supabase
+                      .from("calibration_certificates")
+                      .select("id", { head: true })
+                      .limit(1);
+
+                    if (preErr) {
+                      const status = Number((preErr as any)?.status || (preErr as any)?.statusCode || 0);
+                      if (status === 404) {
+                        setMissingCalibrationTableWarned(true);
+                        try {
+                          localStorage.setItem("missing_table_calibration_certificates", "1");
+                        } catch {
+                        }
+                        const nextLocal = addLocalCalibration(userId, localRecord);
+                        setCalibrations(nextLocal);
+                        toast({
+                          title: "Salvo localmente",
+                          description:
+                            "A tabela calibration_certificates não existe no Supabase. O certificado foi registrado localmente e será sincronizado quando a migration 20260126000001_calibration_certificates.sql for aplicada.",
+                        });
+                        setCalibrationDraft({ equipment_name: "", model: "", manufacturer: "" });
+                        return;
+                      }
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: preErr.message, variant: "destructive" });
+                      return;
+                    }
+
+                    const { error } = await supabase.from("calibration_certificates").insert({
+                      user_id: ownerId,
+                      equipment_name: equipmentName,
+                      model,
+                      manufacturer,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                    });
+
+                    if (error) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: error.message, variant: "destructive" });
+                      return;
+                    }
+
+                    setCalibrationDraft({ equipment_name: "", model: "", manufacturer: "" });
+                    await fetchCalibrations({ force: true });
+                  }}
+                />
+              </TabsContent>
+
+              <TabsContent value="irr" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="irr-representative">Representativo da controvérsia</Label>
+                    <Input
+                      id="irr-representative"
+                      value={irrDraft.representative_controversy}
+                      onChange={(e) => setIrrDraft((p) => ({ ...p, representative_controversy: e.target.value }))}
+                      placeholder="Ex.: IRR Tema 0000"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Tema</Label>
+                    <Select value={irrDraft.theme_type || "none"} onValueChange={(v) => setIrrDraft((p) => ({ ...p, theme_type: v === "none" ? "" : (v as any) }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Selecione</SelectItem>
+                        <SelectItem value="insalubridade">Insalubridade</SelectItem>
+                        <SelectItem value="periculosidade">Periculosidade</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2 md:col-span-3">
+                    <Label htmlFor="irr-legal-thesis">Tese / Questão Jurídica</Label>
+                    <Textarea
+                      id="irr-legal-thesis"
+                      value={irrDraft.legal_thesis}
+                      onChange={(e) => setIrrDraft((p) => ({ ...p, legal_thesis: e.target.value }))}
+                      className="min-h-[160px]"
+                      placeholder="Descreva a tese ou questão jurídica"
+                    />
+                  </div>
+                </div>
+
+                <FileUpload
+                  bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
+                  pathPrefix="irr"
+                  acceptedFileTypes={["application/pdf"]}
+                  maxFileSize={50 * 1024 * 1024}
+                  multiple={false}
+                  enableTextExtraction={false}
+                  onUploadComplete={async (attachmentPath, attachmentName) => {
+                    const representativeControversy = irrDraft.representative_controversy.trim();
+                    const themeType = irrDraft.theme_type;
+                    const legalThesis = irrDraft.legal_thesis.trim();
+
+                    if (!representativeControversy || !themeType || !legalThesis) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({
+                        title: "Campos obrigatórios",
+                        description: "Preencha Representativo da controvérsia, Tema e Tese/Questão Jurídica antes de anexar.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+
+                    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+                    if (userErr || !userRes.user) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
+                      return;
+                    }
+
+                    const userId = userRes.user.id;
+                    const ownerId = materialOwnerId || userId;
+
+                    const localRecord: IrrRecord = {
+                      id: (globalThis.crypto as any)?.randomUUID ? (globalThis.crypto as any).randomUUID() : `${Date.now()}_${Math.random()}`,
+                      representative_controversy: representativeControversy,
+                      theme_type: themeType,
+                      legal_thesis: legalThesis,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                      created_at: new Date().toISOString(),
+                      __local: true,
+                    };
+
+                    if (missingIrrTableWarned) {
+                      const nextLocal = addLocalIrr(userId, localRecord);
+                      setIrrs(nextLocal);
+                      toast({
+                        title: "Salvo localmente",
+                        description:
+                          "A tabela irr_records ainda não está disponível no Supabase. O IRR foi registrado localmente e será sincronizado quando a tabela existir.",
+                      });
+                      setIrrDraft({ representative_controversy: "", theme_type: "", legal_thesis: "" });
+                      return;
+                    }
+
+                    const { error: preErr } = await supabase.from("irr_records").select("id", { head: true }).limit(1);
+                    if (preErr) {
+                      const status = Number((preErr as any)?.status || (preErr as any)?.statusCode || 0);
+                      if (status === 404) {
+                        setMissingIrrTableWarned(true);
+                        try {
+                          localStorage.setItem("missing_table_irr_records", "1");
+                        } catch {
+                        }
+                        const nextLocal = addLocalIrr(userId, localRecord);
+                        setIrrs(nextLocal);
+                        toast({
+                          title: "Salvo localmente",
+                          description:
+                            "A tabela irr_records não existe no Supabase. O IRR foi registrado localmente e será sincronizado quando a migration 20260126000002_irr_records.sql for aplicada.",
+                        });
+                        setIrrDraft({ representative_controversy: "", theme_type: "", legal_thesis: "" });
+                        return;
+                      }
+
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: preErr.message, variant: "destructive" });
+                      return;
+                    }
+
+                    const { error } = await supabase.from("irr_records").insert({
+                      user_id: ownerId,
+                      representative_controversy: representativeControversy,
+                      theme_type: themeType,
+                      legal_thesis: legalThesis,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                    });
+
+                    if (error) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: error.message, variant: "destructive" });
+                      return;
+                    }
+
+                    setIrrDraft({ representative_controversy: "", theme_type: "", legal_thesis: "" });
+                    await fetchIrrs({ force: true });
+                  }}
+                />
+              </TabsContent>
+
+              <TabsContent value="nota-tecnica" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="technical-note-subject">Assunto</Label>
+                    <Input
+                      id="technical-note-subject"
+                      value={technicalNoteDraft.subject}
+                      onChange={(e) => setTechnicalNoteDraft((p) => ({ ...p, subject: e.target.value }))}
+                      placeholder="Ex.: Critério de enquadramento, metodologia"
+                    />
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="technical-note-body">Nota técnica</Label>
+                    <Textarea
+                      id="technical-note-body"
+                      value={technicalNoteDraft.technical_note}
+                      onChange={(e) => setTechnicalNoteDraft((p) => ({ ...p, technical_note: e.target.value }))}
+                      className="min-h-[160px]"
+                      placeholder="Descreva a nota técnica"
+                    />
+                  </div>
+                </div>
+
+                <FileUpload
+                  bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
+                  pathPrefix="nota-tecnica"
+                  acceptedFileTypes={["application/pdf"]}
+                  maxFileSize={50 * 1024 * 1024}
+                  multiple={false}
+                  enableTextExtraction={false}
+                  onUploadComplete={async (attachmentPath, attachmentName) => {
+                    const subject = technicalNoteDraft.subject.trim();
+                    const technicalNote = technicalNoteDraft.technical_note.trim();
+
+                    if (!subject || !technicalNote) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({
+                        title: "Campos obrigatórios",
+                        description: "Preencha Assunto e Nota técnica antes de anexar.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+
+                    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+                    if (userErr || !userRes.user) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
+                      return;
+                    }
+
+                    const userId = userRes.user.id;
+                    const ownerId = materialOwnerId || userId;
+
+                    const localRecord: TechnicalNoteRecord = {
+                      id: (globalThis.crypto as any)?.randomUUID ? (globalThis.crypto as any).randomUUID() : `${Date.now()}_${Math.random()}`,
+                      subject,
+                      technical_note: technicalNote,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                      created_at: new Date().toISOString(),
+                      __local: true,
+                    };
+
+                    if (missingTechnicalNotesTableWarned) {
+                      const nextLocal = addLocalTechnicalNote(userId, localRecord);
+                      setTechnicalNotes(nextLocal);
+                      toast({
+                        title: "Salvo localmente",
+                        description:
+                          "A tabela technical_notes ainda não está disponível no Supabase. A nota técnica foi registrada localmente e será sincronizada quando a tabela existir.",
+                      });
+                      setTechnicalNoteDraft({ subject: "", technical_note: "" });
+                      return;
+                    }
+
+                    const { error: preErr } = await supabase.from("technical_notes").select("id", { head: true }).limit(1);
+                    if (preErr) {
+                      const status = Number((preErr as any)?.status || (preErr as any)?.statusCode || 0);
+                      if (status === 404) {
+                        setMissingTechnicalNotesTableWarned(true);
+                        try {
+                          localStorage.setItem("missing_table_technical_notes", "1");
+                        } catch {
+                        }
+                        const nextLocal = addLocalTechnicalNote(userId, localRecord);
+                        setTechnicalNotes(nextLocal);
+                        toast({
+                          title: "Salvo localmente",
+                          description:
+                            "A tabela technical_notes não existe no Supabase. A nota técnica foi registrada localmente e será sincronizada quando a migration 20260126000003_technical_notes.sql for aplicada.",
+                        });
+                        setTechnicalNoteDraft({ subject: "", technical_note: "" });
+                        return;
+                      }
+
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: preErr.message, variant: "destructive" });
+                      return;
+                    }
+
+                    const { error } = await supabase.from("technical_notes").insert({
+                      user_id: ownerId,
+                      subject,
+                      technical_note: technicalNote,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                    });
+
+                    if (error) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: error.message, variant: "destructive" });
+                      return;
+                    }
+
+                    setTechnicalNoteDraft({ subject: "", technical_note: "" });
+                    await fetchTechnicalNotes({ force: true });
+                  }}
+                />
+              </TabsContent>
+
+              <TabsContent value="sumula" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="sumula-number">Número da súmula</Label>
+                    <Input
+                      id="sumula-number"
+                      value={sumulaDraft.sumula_number}
+                      onChange={(e) => setSumulaDraft((p) => ({ ...p, sumula_number: e.target.value }))}
+                      placeholder="Ex.: 331"
+                    />
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="sumula-legal-issue">Assunto / questão jurídica</Label>
+                    <Textarea
+                      id="sumula-legal-issue"
+                      value={sumulaDraft.legal_issue}
+                      onChange={(e) => setSumulaDraft((p) => ({ ...p, legal_issue: e.target.value }))}
+                      className="min-h-[130px]"
+                      placeholder="Descreva o tema/questão jurídica"
+                    />
+                  </div>
+                </div>
+
+                <FileUpload
+                  bucketName="process-documents"
+                  targetUserId={materialOwnerId || undefined}
+                  pathPrefix="sumula"
+                  acceptedFileTypes={["application/pdf"]}
+                  maxFileSize={50 * 1024 * 1024}
+                  multiple={false}
+                  enableTextExtraction={false}
+                  onUploadComplete={async (attachmentPath, attachmentName) => {
+                    const sumulaNumber = sumulaDraft.sumula_number.trim();
+                    const legalIssue = sumulaDraft.legal_issue.trim();
+
+                    if (!sumulaNumber || !legalIssue) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({
+                        title: "Campos obrigatórios",
+                        description: "Preencha Número da súmula e Assunto / questão jurídica antes de anexar.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+
+                    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+                    if (userErr || !userRes.user) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
+                      return;
+                    }
+
+                    const userId = userRes.user.id;
+                    const ownerId = materialOwnerId || userId;
+
+                    const localRecord: SumulaRecord = {
+                      id: (globalThis.crypto as any)?.randomUUID
+                        ? (globalThis.crypto as any).randomUUID()
+                        : `${Date.now()}_${Math.random()}`,
+                      sumula_number: sumulaNumber,
+                      legal_issue: legalIssue,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                      created_at: new Date().toISOString(),
+                      __local: true,
+                    };
+
+                    if (missingSumulaTableWarned) {
+                      const nextLocal = addLocalSumula(userId, localRecord);
+                      setSumulas(nextLocal);
+                      toast({
+                        title: "Salvo localmente",
+                        description:
+                          "A tabela sumula_records ainda não está disponível no Supabase. A súmula foi registrada localmente e será sincronizada quando a tabela existir.",
+                      });
+                      setSumulaDraft({ sumula_number: "", legal_issue: "" });
+                      return;
+                    }
+
+                    const { error: preErr } = await supabase.from("sumula_records").select("id", { head: true }).limit(1);
+                    if (preErr) {
+                      const status = Number((preErr as any)?.status || (preErr as any)?.statusCode || 0);
+                      if (status === 404) {
+                        setMissingSumulaTableWarned(true);
+                        try {
+                          localStorage.setItem("missing_table_sumula_records", "1");
+                        } catch {
+                        }
+                        const nextLocal = addLocalSumula(userId, localRecord);
+                        setSumulas(nextLocal);
+                        toast({
+                          title: "Salvo localmente",
+                          description:
+                            "A tabela sumula_records não existe no Supabase. A súmula foi registrada localmente e será sincronizada quando a migration 20260126000004_sumula_records.sql for aplicada.",
+                        });
+                        setSumulaDraft({ sumula_number: "", legal_issue: "" });
+                        return;
+                      }
+
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: preErr.message, variant: "destructive" });
+                      return;
+                    }
+
+                    const { error } = await supabase.from("sumula_records").insert({
+                      user_id: ownerId,
+                      sumula_number: sumulaNumber,
+                      legal_issue: legalIssue,
+                      attachment_path: attachmentPath,
+                      attachment_name: attachmentName,
+                    });
+
+                    if (error) {
+                      await supabase.storage.from("process-documents").remove([attachmentPath]);
+                      toast({ title: "Erro", description: error.message, variant: "destructive" });
+                      return;
+                    }
+
+                    setSumulaDraft({ sumula_number: "", legal_issue: "" });
+                    await fetchSumulas({ force: true });
+                  }}
+                />
+              </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
@@ -1804,6 +3386,367 @@ export default function MaterialConsulta() {
                                   onClick={() => deleteBulletin(b)}
                                   className="bg-red-600 hover:bg-red-700"
                                 >
+                                  Excluir
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
+        ) : activeTab === "calibracao" ? (
+          <>
+            <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input
+                  value={calibrationQuery}
+                  onChange={(e) => setCalibrationQuery(e.target.value)}
+                  className="pl-9"
+                  placeholder="Pesquisar por equipamento, modelo, fabricante ou arquivo"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{filteredCalibrations.length} certificado(s)</Badge>
+                <Button variant="outline" onClick={() => fetchCalibrations({ force: true })} disabled={calibrationLoading}>
+                  {calibrationLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            {calibrationLoading ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Carregando...</span>
+                </CardContent>
+              </Card>
+            ) : filteredCalibrations.length === 0 ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 text-center text-muted-foreground">Nenhum certificado cadastrado.</CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {filteredCalibrations.map((c) => (
+                  <Card key={c.id} className="shadow-card">
+                    <CardContent className="pt-6">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{c.equipment_name}</div>
+                          <div className="text-sm text-muted-foreground flex flex-wrap gap-x-2">
+                            <span>Modelo: {c.model}</span>
+                            <span>•</span>
+                            <span>{c.manufacturer}</span>
+                            <span>•</span>
+                            <span>{new Date(c.created_at).toLocaleDateString("pt-BR")}</span>
+                            {c.__local ? (
+                              <>
+                                <span>•</span>
+                                <Badge variant="outline">Local</Badge>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="text-sm text-muted-foreground truncate">{c.attachment_name}</div>
+                        </div>
+
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button variant="ghost" size="sm" onClick={() => previewCalibrationAttachment(c)} title="Visualizar">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => downloadCalibrationAttachment(c)} title="Baixar">
+                            <Download className="w-4 h-4" />
+                          </Button>
+
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="sm" disabled={deletingCalibrationId === c.id} title="Excluir">
+                                {deletingCalibrationId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Tem certeza que deseja excluir o certificado "{c.equipment_name}"?
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteCalibration(c)} className="bg-red-600 hover:bg-red-700">
+                                  Excluir
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
+        ) : activeTab === "irr" ? (
+          <>
+            <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input
+                  value={irrQuery}
+                  onChange={(e) => setIrrQuery(e.target.value)}
+                  className="pl-9"
+                  placeholder="Pesquisar por controvérsia, tema, tese ou arquivo"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{filteredIrrs.length} IRR(s)</Badge>
+                <Button variant="outline" onClick={() => fetchIrrs({ force: true })} disabled={irrLoading}>
+                  {irrLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            {irrLoading ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Carregando...</span>
+                </CardContent>
+              </Card>
+            ) : filteredIrrs.length === 0 ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 text-center text-muted-foreground">Nenhum IRR cadastrado.</CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {filteredIrrs.map((r) => (
+                  <Card key={r.id} className="shadow-card">
+                    <CardContent className="pt-6">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{r.representative_controversy}</div>
+                          <div className="text-sm text-muted-foreground flex flex-wrap gap-x-2">
+                            <span>{r.theme_type === "insalubridade" ? "Insalubridade" : "Periculosidade"}</span>
+                            <span>•</span>
+                            <span>{new Date(r.created_at).toLocaleDateString("pt-BR")}</span>
+                            {r.__local ? (
+                              <>
+                                <span>•</span>
+                                <Badge variant="outline">Local</Badge>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="text-sm text-muted-foreground truncate">{r.legal_thesis}</div>
+                          <div className="text-sm text-muted-foreground truncate">{r.attachment_name}</div>
+                        </div>
+
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button variant="ghost" size="sm" onClick={() => previewIrrAttachment(r)} title="Visualizar">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => downloadIrrAttachment(r)} title="Baixar">
+                            <Download className="w-4 h-4" />
+                          </Button>
+
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="sm" disabled={deletingIrrId === r.id} title="Excluir">
+                                {deletingIrrId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Tem certeza que deseja excluir o IRR "{r.representative_controversy}"?
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteIrr(r)} className="bg-red-600 hover:bg-red-700">
+                                  Excluir
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
+        ) : activeTab === "nota-tecnica" ? (
+          <>
+            <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input
+                  value={technicalNoteQuery}
+                  onChange={(e) => setTechnicalNoteQuery(e.target.value)}
+                  className="pl-9"
+                  placeholder="Pesquisar por assunto, nota ou arquivo"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{filteredTechnicalNotes.length} nota(s)</Badge>
+                <Button variant="outline" onClick={() => fetchTechnicalNotes({ force: true })} disabled={technicalNotesLoading}>
+                  {technicalNotesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            {technicalNotesLoading ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Carregando...</span>
+                </CardContent>
+              </Card>
+            ) : filteredTechnicalNotes.length === 0 ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 text-center text-muted-foreground">Nenhuma nota técnica cadastrada.</CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {filteredTechnicalNotes.map((n) => (
+                  <Card key={n.id} className="shadow-card">
+                    <CardContent className="pt-6">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{n.subject}</div>
+                          <div className="text-sm text-muted-foreground flex flex-wrap gap-x-2">
+                            <span>{new Date(n.created_at).toLocaleDateString("pt-BR")}</span>
+                            {n.__local ? (
+                              <>
+                                <span>•</span>
+                                <Badge variant="outline">Local</Badge>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="text-sm text-muted-foreground truncate">{n.technical_note}</div>
+                          <div className="text-sm text-muted-foreground truncate">{n.attachment_name}</div>
+                        </div>
+
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button variant="ghost" size="sm" onClick={() => previewTechnicalNoteAttachment(n)} title="Visualizar">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => downloadTechnicalNoteAttachment(n)} title="Baixar">
+                            <Download className="w-4 h-4" />
+                          </Button>
+
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="sm" disabled={deletingTechnicalNoteId === n.id} title="Excluir">
+                                {deletingTechnicalNoteId === n.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Tem certeza que deseja excluir a nota técnica "{n.subject}"?
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteTechnicalNote(n)} className="bg-red-600 hover:bg-red-700">
+                                  Excluir
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
+        ) : activeTab === "sumula" ? (
+          <>
+            <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input
+                  value={sumulaQuery}
+                  onChange={(e) => setSumulaQuery(e.target.value)}
+                  className="pl-9"
+                  placeholder="Pesquisar por número, assunto ou arquivo"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{filteredSumulas.length} súmula(s)</Badge>
+                <Button variant="outline" onClick={() => fetchSumulas({ force: true })} disabled={sumulasLoading}>
+                  {sumulasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            {sumulasLoading ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Carregando...</span>
+                </CardContent>
+              </Card>
+            ) : filteredSumulas.length === 0 ? (
+              <Card className="shadow-card">
+                <CardContent className="py-10 text-center text-muted-foreground">Nenhuma súmula cadastrada.</CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {filteredSumulas.map((s) => (
+                  <Card key={s.id} className="shadow-card">
+                    <CardContent className="pt-6">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">Súmula {s.sumula_number}</div>
+                          <div className="text-sm text-muted-foreground flex flex-wrap gap-x-2">
+                            <span>{new Date(s.created_at).toLocaleDateString("pt-BR")}</span>
+                            {s.__local ? (
+                              <>
+                                <span>•</span>
+                                <Badge variant="outline">Local</Badge>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="text-sm text-muted-foreground truncate">{s.legal_issue}</div>
+                          <div className="text-sm text-muted-foreground truncate">{s.attachment_name}</div>
+                        </div>
+
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button variant="ghost" size="sm" onClick={() => previewSumulaAttachment(s)} title="Visualizar">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => downloadSumulaAttachment(s)} title="Baixar">
+                            <Download className="w-4 h-4" />
+                          </Button>
+
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="sm" disabled={deletingSumulaId === s.id} title="Excluir">
+                                {deletingSumulaId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Tem certeza que deseja excluir a súmula "{s.sumula_number}"?
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteSumula(s)} className="bg-red-600 hover:bg-red-700">
                                   Excluir
                                 </AlertDialogAction>
                               </AlertDialogFooter>
