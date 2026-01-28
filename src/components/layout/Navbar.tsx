@@ -86,41 +86,41 @@ export default function Navbar() {
 
           <div className="flex items-center gap-2">
             <div className="hidden lg:flex items-center gap-1">
-              <Link to="/dashboard">
-                <Button variant="ghost">Dashboard</Button>
-              </Link>
-              <Link to="/agendamento">
-                <Button variant="ghost">Agendamento</Button>
-              </Link>
-              <Link to="/processos">
-                <Button variant="ghost">Processos</Button>
-              </Link>
+              <Button asChild variant="ghost">
+                <Link to="/dashboard">Dashboard</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link to="/agendamento">Agendamento</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link to="/processos">Processos</Link>
+              </Button>
               {!isLinked && (
-                <Link to="/configuracao-relatorio">
-                  <Button variant="ghost">Configuração do Relatório</Button>
-                </Link>
+                <Button asChild variant="ghost">
+                  <Link to="/configuracao-relatorio">Configuração do Relatório</Link>
+                </Button>
               )}
-              <Link to="/material-consulta">
-                <Button variant="ghost">Material de Consulta</Button>
-              </Link>
+              <Button asChild variant="ghost">
+                <Link to="/material-consulta">Material de Consulta</Link>
+              </Button>
               {!isLinked && (
-                <Link to="/usuarios-vinculados">
-                  <Button variant="ghost">Usuários Vinculados</Button>
-                </Link>
+                <Button asChild variant="ghost">
+                  <Link to="/usuarios-vinculados">Usuários Vinculados</Link>
+                </Button>
               )}
               {(adminEnabled || isAdmin(userEmail)) && (
-                <Link to="/pagamento">
-                  <Button variant="ghost">Pagamento</Button>
-                </Link>
+                <Button asChild variant="ghost">
+                  <Link to="/pagamento">Pagamento</Link>
+                </Button>
               )}
               {(adminEnabled || isAdmin(userEmail)) && (
-                <Link to="/admin/usuarios">
-                  <Button variant="ghost">Admin</Button>
-                </Link>
+                <Button asChild variant="ghost">
+                  <Link to="/admin/usuarios">Admin</Link>
+                </Button>
               )}
-              <Link to="/novo-processo">
-                <Button variant="default">Novo Processo</Button>
-              </Link>
+              <Button asChild variant="default">
+                <Link to="/novo-processo">Novo Processo</Link>
+              </Button>
             </div>
 
             <div className="lg:hidden">
